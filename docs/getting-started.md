@@ -3,8 +3,8 @@
 ## Prerequisites
 
 - **Terraform** >= 1.5
-- **AWS Provider** >= 5.11, < 7.0
-- Access to the **AWS Organizations management account** (990466748045)
+- **AWS Provider** >= 6.0, < 7.0
+- Access to the **AWS Organizations management account**
 - The `AWSControlTowerExecution` role must exist in member accounts
   (automatically created by AWS Control Tower)
 
