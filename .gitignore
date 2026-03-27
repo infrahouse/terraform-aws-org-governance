@@ -1,0 +1,28 @@
+# Local .terraform directories
+**/.terraform/*
+
+# .tfstate files
+*.tfstate
+*.tfstate.*
+
+# Crash log files
+crash.log
+
+# Ignore override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+.terraform.lock.hcl
+terraform.tfvars
+tf.plan
+.idea
+/docs/_build/
+/plan.stderr
+/plan.stdout
+__pycache__
+.pytest_cache
+pytest-*-output.log
+/.claude/*.local.json
+/.claude/reviews/
