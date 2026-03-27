@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 env:
-  ROLE_ARN: "arn:aws:iam::990466748045:role/org-governance-tester"
-  AWS_DEFAULT_REGION: "us-west-2"
+  ROLE_ARN: "arn:aws:iam::493370826424:role/ih-tf-terraform-aws-org-governance-github"
+  AWS_DEFAULT_REGION: "us-west-1"
 
 jobs:
   publish:
