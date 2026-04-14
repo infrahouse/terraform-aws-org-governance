@@ -5,8 +5,8 @@
 - **Terraform** >= 1.5
 - **AWS Provider** >= 6.0, < 7.0
 - Access to the **AWS Organizations management account**
-- The `AWSControlTowerExecution` role must exist in member accounts
-  (automatically created by AWS Control Tower)
+- The `InfraHouseLogRetention` role must exist in member accounts
+  (provisioned by [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001))
 
 ## First Deployment
 
@@ -33,7 +33,7 @@
     - A Lambda function (`enforce-log-retention`) that runs daily
     - An EventBridge rule to trigger the Lambda on schedule
     - An IAM role with permissions to list org accounts and assume
-      `AWSControlTowerExecution` in each member account
+      `InfraHouseLogRetention` in each member account
     - CloudWatch alarms for Lambda errors (notifications sent to
       `alarm_emails`)
 
