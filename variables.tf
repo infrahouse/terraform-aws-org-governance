@@ -52,6 +52,18 @@ variable "enforce_log_retention_prefixes" {
   ]
 }
 
+variable "enforce_log_retention_role_name" {
+  description = <<-EOT
+    Name of the cross-account IAM role the Lambda assumes in each
+    member account to enforce log retention. The role must exist in
+    every scanned account and trust the management account root.
+    Defaults to InfraHouseLogRetention, provisioned by
+    terraform-aws-iso27001.
+  EOT
+  type        = string
+  default     = "InfraHouseLogRetention"
+}
+
 variable "enforce_log_retention_schedule" {
   description = <<-EOT
     EventBridge schedule expression for the log retention
