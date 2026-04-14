@@ -11,10 +11,11 @@ data "aws_iam_policy_document" "enforce_log_retention" {
   }
 
   statement {
-    sid    = "DescribeRegions"
+    sid    = "GetGovernedRegions"
     effect = "Allow"
     actions = [
-      "ec2:DescribeRegions",
+      "controltower:ListLandingZones",
+      "controltower:GetLandingZone",
     ]
     resources = ["*"]
   }

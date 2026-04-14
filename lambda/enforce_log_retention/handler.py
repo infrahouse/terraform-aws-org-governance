@@ -39,11 +39,23 @@ def _get_active_account_ids() -> list[str]:
     return account_ids
 
 
-def _get_enabled_regions() -> list[str]:
-    """Return region names for all enabled regions in the account."""
-    ec2 = boto3.client("ec2")
-    response = ec2.describe_regions(AllRegions=False)
-    return [r["RegionName"] for r in response["Regions"]]
+def _get_governed_regions() -> list[str]:
+    """Return region names governed by the Control Tower landing zone.
+
+    Scoping to governed regions (instead of every enabled region in the
+    caller account) avoids hitting opt-in regions where STS endpoints
+    are unreachable from the Lambda's network.
+    """
+    ct = boto3.client("controltower")
+    landing_zones = ct.list_landing_zones()["landingZones"]
+    if not landing_zones:
+        raise RuntimeError(
+            "No Control Tower landing zone found in this account"
+        )
+    lz = ct.get_landing_zone(
+        landingZoneIdentifier=landing_zones[0]["arn"]
+    )["landingZone"]
+    return list(lz["manifest"]["governedRegions"])
 
 
 def _enforce_in_account_region(
@@ -87,7 +99,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     role_name = os.environ["ASSUME_ROLE_NAME"]
 
     account_ids = _get_active_account_ids()
-    regions = _get_enabled_regions()
+    regions = _get_governed_regions()
     LOG.info(
         "Scanning %d accounts across %d regions (%d workers)",
         len(account_ids),
