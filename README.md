@@ -12,18 +12,18 @@
 
 Centralized AWS Organizations governance module deployed in the management account. It handles
 compliance and governance tasks that require management-account-level access, such as assuming
-`AWSControlTowerExecution` into member accounts or calling AWS Organizations APIs.
+cross-account roles into member accounts or calling AWS Organizations APIs.
 
 ## Features
 
 - **CloudWatch Log Retention Enforcement** -- A Lambda function that enforces log retention
   policies across all member accounts. It lists accounts via `organizations:ListAccounts`,
-  assumes `AWSControlTowerExecution` into each account across all enabled regions, and sets
-  retention on CloudWatch
-  log groups matching configurable prefixes (e.g., `aws-controltower` groups locked by
-  Control Tower's mandatory SCP).
+  assumes the `InfraHouseLogRetention` role (provisioned in each member account by
+  [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001)) across all
+  enabled regions, and sets retention on CloudWatch log groups matching configurable prefixes
+  (e.g., `aws-controltower` groups locked by Control Tower's mandatory SCP).
 - **Management Account Deployment** -- Designed to run from the management account where
-  AWS Organizations APIs and `AWSControlTowerExecution` role assumption are available.
+  AWS Organizations APIs are available.
 - **ISO 27001 Compliance** -- Enforces 365-day log retention to meet ISO 27001 and SOC 2
   requirements.
 

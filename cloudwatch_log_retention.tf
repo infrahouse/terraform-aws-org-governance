@@ -29,7 +29,7 @@ data "aws_iam_policy_document" "enforce_log_retention" {
     # policy is the real access boundary. Enumerating org account IDs
     # here would force a policy update on every account change.
     resources = [
-      "arn:aws:iam::*:role/AWSControlTowerExecution",
+      "arn:aws:iam::*:role/InfraHouseLogRetention",
     ]
   }
 }
@@ -58,7 +58,7 @@ module "enforce_log_retention" {
   environment_variables = {
     RETENTION_DAYS     = tostring(var.cloudwatch_retention_days)
     LOG_GROUP_PREFIXES = jsonencode(var.enforce_log_retention_prefixes)
-    ASSUME_ROLE_NAME   = "AWSControlTowerExecution"
+    ASSUME_ROLE_NAME   = "InfraHouseLogRetention"
   }
 
   additional_iam_policy_arns = [

@@ -1,8 +1,9 @@
 """Enforce minimum CloudWatch log group retention for compliance.
 
 Deployed in the management account, iterates over all organization
-member accounts and regions. Assumes AWSControlTowerExecution in
-each account to bypass SCPs that protect Control Tower log groups.
+member accounts and regions. Assumes the InfraHouseLogRetention role
+(provisioned by terraform-aws-iso27001 in each member account) to
+apply retention updates under least-privilege permissions.
 
 Only updates log groups matching configured prefixes — these are
 implicitly created by AWS services (Control Tower, ECS Container
