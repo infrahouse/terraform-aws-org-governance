@@ -98,34 +98,14 @@ def _get_governed_regions() -> list[str]:
     return list(lz["manifest"]["governedRegions"])
 
 
-def _tag_vanta_excluded(session, prefixes: list[str]) -> int:
-    """Tag Vanta-excluded log groups in one account+region.
-
-    Checks for *presence* of the ``VantaNoAlert`` key rather than
-    value equality: Vanta only cares that the key exists, so any
-    pre-existing value is honored and never overwritten.
-    """
-    tagged = 0
-    for pfx in prefixes:
-        for lg in CloudWatchLogGroup.list_log_groups(prefix=pfx, session=session):
-            if VANTA_EXCLUDE_TAG_KEY not in lg.tags:
-                lg.set_tag(VANTA_EXCLUDE_TAG_KEY, VANTA_EXCLUDE_TAG_VALUE)
-                tagged += 1
-    return tagged
-
-
-def _enforce_in_account_region(
+def _retention_pass(
     account_id: str,
     region: str,
     role_name: str,
     retention_prefixes: list[str],
     retention_days: int,
-    vanta_exclude_prefixes: list[str],
-) -> tuple[int, int]:
-    """Enforce retention and Vanta tagging in one account+region.
-
-    Returns ``(retention_updates, vanta_tags)``.
-    """
+) -> int:
+    """Enforce retention in one account+region. Returns update count."""
     session = get_session(
         role_arn=f"arn:aws:iam::{account_id}:role/{role_name}",
         region=region,
@@ -146,12 +126,45 @@ def _enforce_in_account_region(
                     retention_days,
                 )
                 updated += 1
-    tagged = _tag_vanta_excluded(session, vanta_exclude_prefixes)
-    return updated, tagged
+    return updated
+
+
+def _vanta_pass(
+    account_id: str,
+    region: str,
+    role_name: str,
+    prefixes: list[str],
+) -> int:
+    """Tag Vanta-excluded log groups in one account+region.
+
+    Checks for *presence* of the ``VantaNoAlert`` key rather than
+    value equality: Vanta only cares that the key exists, so any
+    pre-existing value is honored and never overwritten.
+    """
+    session = get_session(
+        role_arn=f"arn:aws:iam::{account_id}:role/{role_name}",
+        region=region,
+        session_name="enforce-log-retention-vanta",
+    )
+    tagged = 0
+    for pfx in prefixes:
+        for lg in CloudWatchLogGroup.list_log_groups(prefix=pfx, session=session):
+            if VANTA_EXCLUDE_TAG_KEY not in lg.tags:
+                lg.set_tag(VANTA_EXCLUDE_TAG_KEY, VANTA_EXCLUDE_TAG_VALUE)
+                tagged += 1
+    return tagged
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
-    """Scan log groups across all accounts and regions."""
+    """Scan log groups across all accounts and regions.
+
+    Runs the two passes in separate ThreadPoolExecutor phases so a
+    failure in one cannot cancel pending work in the other. Retention
+    is the compliance-critical path and keeps fail-fast semantics;
+    Vanta tagging is cosmetic (it only hides false positives in
+    Vanta's alert feed) and runs best-effort — per-worker exceptions
+    are logged and counted, but do not halt the phase.
+    """
     retention_days = int(os.environ["RETENTION_DAYS"])
     retention_prefixes = json.loads(os.environ["LOG_GROUP_PREFIXES"])
     vanta_exclude_prefixes = json.loads(os.environ.get("VANTA_EXCLUDE_PREFIXES", "[]"))
@@ -178,6 +191,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
 
     account_ids = sorted((active_accounts & enrolled_accounts) - excluded)
     regions = _get_governed_regions()
+    targets = [(a, r) for a in account_ids for r in regions]
     LOG.info(
         "Scanning %d accounts across %d regions (%d workers)",
         len(account_ids),
@@ -185,42 +199,67 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
         MAX_WORKERS,
     )
 
+    # Phase 1: retention enforcement — fail fast on any worker error
+    # so the operator is alerted and can fix the root cause before
+    # the next daily run. Retries are intentionally not implemented.
     total_updated = 0
-    total_tagged = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
             executor.submit(
-                _enforce_in_account_region,
+                _retention_pass,
                 account_id,
                 region,
                 role_name,
                 retention_prefixes,
                 retention_days,
-                vanta_exclude_prefixes,
             ): (account_id, region)
-            for account_id in account_ids
-            for region in regions
+            for account_id, region in targets
         }
         for future in as_completed(futures):
             try:
-                updated, tagged = future.result()
-                total_updated += updated
-                total_tagged += tagged
+                total_updated += future.result()
             except Exception:
-                # Fail fast on the first error: cancel pending work
-                # so we stop issuing new API calls, then re-raise.
-                # In-flight workers cannot be interrupted and will
-                # finish before the Lambda invocation ends. Retries
-                # are intentionally not implemented — the operator
-                # should be alerted and fix the root cause so every
-                # log group is processed on the next run.
                 for f in futures:
                     f.cancel()
                 raise
 
+    # Phase 2: Vanta tagging — best-effort. A failure here does not
+    # change compliance posture (retention is already enforced), so
+    # log and continue instead of aborting the remaining workers.
+    total_tagged = 0
+    vanta_errors = 0
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(
+                _vanta_pass,
+                account_id,
+                region,
+                role_name,
+                vanta_exclude_prefixes,
+            ): (account_id, region)
+            for account_id, region in targets
+        }
+        for future in as_completed(futures):
+            account_id, region = futures[future]
+            try:
+                total_tagged += future.result()
+            except Exception:
+                LOG.exception(
+                    "Vanta tagging failed for account %s region %s",
+                    account_id,
+                    region,
+                )
+                vanta_errors += 1
+
     LOG.info(
-        "Done. Updated %d log group(s), tagged %d for Vanta exclusion.",
+        "Done. Updated %d log group(s), tagged %d for Vanta exclusion "
+        "(%d vanta errors).",
         total_updated,
         total_tagged,
+        vanta_errors,
     )
-    return {"updated": total_updated, "tagged": total_tagged}
+    return {
+        "updated": total_updated,
+        "tagged": total_tagged,
+        "vanta_errors": vanta_errors,
+    }
