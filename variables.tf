@@ -64,6 +64,18 @@ variable "enforce_log_retention_role_name" {
   default     = "InfraHouseLogRetention"
 }
 
+variable "control_tower_home_region" {
+  description = <<-EOT
+    AWS region where the Control Tower landing zone is configured
+    (its "home" region). Control Tower APIs are regional and only
+    return the landing zone in its home region. Defaults to null,
+    in which case the Lambda's own region is used — set this only
+    when the Lambda runs in a different region than Control Tower.
+  EOT
+  type        = string
+  default     = null
+}
+
 variable "enforce_log_retention_schedule" {
   description = <<-EOT
     EventBridge schedule expression for the log retention

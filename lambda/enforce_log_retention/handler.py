@@ -46,7 +46,12 @@ def _get_governed_regions() -> list[str]:
     caller account) avoids hitting opt-in regions where STS endpoints
     are unreachable from the Lambda's network.
     """
-    ct = boto3.client("controltower")
+    # Control Tower APIs are regional — the landing zone is only
+    # visible in its home region, which may differ from the Lambda's
+    # own region.
+    ct = boto3.client(
+        "controltower", region_name=os.environ["CONTROL_TOWER_HOME_REGION"]
+    )
     landing_zones = ct.list_landing_zones()["landingZones"]
     if not landing_zones:
         raise RuntimeError(
