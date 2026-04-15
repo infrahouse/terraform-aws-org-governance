@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-04-15
+
+### Bug Fixes
+
+- Assume InfraHouseLogRetention role in member accounts
+- Make enforce-log-retention role name configurable
+- Scan only Control Tower governed regions
+- Scope controltower:GetLandingZone to landingzone ARN
+- Pin Control Tower client to landing zone home region
+
 ## [0.2.1] - 2026-03-27
 
 ### Ci
