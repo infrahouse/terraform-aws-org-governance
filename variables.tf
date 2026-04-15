@@ -42,12 +42,37 @@ variable "cloudwatch_retention_days" {
 variable "enforce_log_retention_prefixes" {
   description = <<-EOT
     Log group name prefixes to target for retention enforcement.
-    Only log groups matching these prefixes will be updated.
+    Only log groups matching these prefixes will have their
+    retention updated. Defaults to an empty list — log groups that
+    belong to other InfraHouse modules (e.g., GuardDuty scan
+    events in terraform-aws-iso27001) should declare their own
+    retention at creation time rather than relying on this Lambda
+    to correct it after the fact. Control Tower log groups are
+    intentionally not included here either — the GRLOGGROUPPOLICY
+    guardrail denies logs:PutRetentionPolicy on *aws-controltower*
+    log groups for any principal other than
+    AWSControlTowerExecution, so they are handled via
+    vanta_exclude_prefixes instead.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
+variable "vanta_exclude_prefixes" {
+  description = <<-EOT
+    Log group name prefixes to tag with VantaNoAlert=true, marking
+    them out of scope for Vanta compliance tests. Use this for log
+    groups where retention cannot be changed to satisfy a Vanta
+    test (e.g., Control Tower managed log groups blocked by the
+    GRLOGGROUPPOLICY SCP). Vanta honors the VantaNoAlert tag
+    continuously via its AWS integration, so tagged resources are
+    excluded from tests such as "Server logs retained for 365
+    days (AWS)". Applying is idempotent — already-tagged groups
+    are skipped.
   EOT
   type        = list(string)
   default = [
     "/aws/lambda/aws-controltower-",
-    "/aws/guardduty/",
     "StackSet-AWSControlTowerBP-",
   ]
 }

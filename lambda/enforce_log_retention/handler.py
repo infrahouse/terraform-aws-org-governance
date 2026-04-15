@@ -1,13 +1,22 @@
-"""Enforce minimum CloudWatch log group retention for compliance.
+"""Enforce CloudWatch log group compliance across the organization.
 
 Deployed in the management account, iterates over all organization
 member accounts and regions. Assumes the InfraHouseLogRetention role
 (provisioned by terraform-aws-iso27001 in each member account) to
-apply retention updates under least-privilege permissions.
+apply changes under least-privilege permissions.
 
-Only updates log groups matching configured prefixes — these are
-implicitly created by AWS services (Control Tower, ECS Container
-Insights, GuardDuty, etc.) and not managed by Terraform.
+Two passes run per account+region:
+
+1. Retention enforcement — for log groups matching
+   ``LOG_GROUP_PREFIXES``, set ``retentionInDays`` to the configured
+   value. Targets log groups implicitly created by AWS services
+   (GuardDuty, ECS, etc.) and not managed by Terraform.
+
+2. Vanta exclusion tagging — for log groups matching
+   ``VANTA_EXCLUDE_PREFIXES``, apply ``VantaNoAlert=true`` so Vanta
+   marks them out of scope. Used for Control Tower managed log
+   groups where the GRLOGGROUPPOLICY guardrail blocks retention
+   changes for any principal other than AWSControlTowerExecution.
 """
 
 import json
@@ -25,6 +34,9 @@ LOG = logging.getLogger(__name__)
 setup_logging(LOG)
 
 MAX_WORKERS = 20
+
+VANTA_EXCLUDE_TAG_KEY = "VantaNoAlert"
+VANTA_EXCLUDE_TAG_VALUE = "true"
 
 
 def _get_active_account_ids() -> list[str]:
@@ -86,41 +98,63 @@ def _get_governed_regions() -> list[str]:
     return list(lz["manifest"]["governedRegions"])
 
 
+def _tag_vanta_excluded(session, prefixes: list[str]) -> int:
+    """Tag Vanta-excluded log groups in one account+region.
+
+    Checks for *presence* of the ``VantaNoAlert`` key rather than
+    value equality: Vanta only cares that the key exists, so any
+    pre-existing value is honored and never overwritten.
+    """
+    tagged = 0
+    for pfx in prefixes:
+        for lg in CloudWatchLogGroup.list_log_groups(prefix=pfx, session=session):
+            if VANTA_EXCLUDE_TAG_KEY not in lg.tags:
+                lg.set_tag(VANTA_EXCLUDE_TAG_KEY, VANTA_EXCLUDE_TAG_VALUE)
+                tagged += 1
+    return tagged
+
+
 def _enforce_in_account_region(
     account_id: str,
     region: str,
     role_name: str,
-    prefixes: list[str],
+    retention_prefixes: list[str],
     retention_days: int,
-) -> int:
-    """Enforce log retention in one account+region. Returns count of updated groups."""
+    vanta_exclude_prefixes: list[str],
+) -> tuple[int, int]:
+    """Enforce retention and Vanta tagging in one account+region.
+
+    Returns ``(retention_updates, vanta_tags)``.
+    """
     session = get_session(
         role_arn=f"arn:aws:iam::{account_id}:role/{role_name}",
         region=region,
         session_name="enforce-log-retention",
     )
     updated = 0
-    for pfx in prefixes:
+    for pfx in retention_prefixes:
         for lg in CloudWatchLogGroup.list_log_groups(prefix=pfx, session=session):
             current = lg.retention_in_days
             if current != retention_days:
+                lg.set_retention(retention_days)
                 LOG.info(
-                    "Account %s %s: updating %s " "retention from %s to %d days",
+                    "Account %s %s: updated %s retention from %s to %d days",
                     account_id,
                     region,
                     lg.log_group_name,
                     current,
                     retention_days,
                 )
-                lg.set_retention(retention_days)
                 updated += 1
-    return updated
+    tagged = _tag_vanta_excluded(session, vanta_exclude_prefixes)
+    return updated, tagged
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     """Scan log groups across all accounts and regions."""
     retention_days = int(os.environ["RETENTION_DAYS"])
-    prefixes = json.loads(os.environ["LOG_GROUP_PREFIXES"])
+    retention_prefixes = json.loads(os.environ["LOG_GROUP_PREFIXES"])
+    vanta_exclude_prefixes = json.loads(os.environ.get("VANTA_EXCLUDE_PREFIXES", "[]"))
     role_name = os.environ["ASSUME_ROLE_NAME"]
     home_region = os.environ["CONTROL_TOWER_HOME_REGION"]
     excluded = set(json.loads(os.environ.get("EXCLUDED_ACCOUNTS", "[]")))
@@ -152,6 +186,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     )
 
     total_updated = 0
+    total_tagged = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
             executor.submit(
@@ -159,16 +194,33 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
                 account_id,
                 region,
                 role_name,
-                prefixes,
+                retention_prefixes,
                 retention_days,
+                vanta_exclude_prefixes,
             ): (account_id, region)
             for account_id in account_ids
             for region in regions
         }
         for future in as_completed(futures):
-            account_id, region = futures[future]
-            # Let exceptions propagate — better to crash than mute
-            total_updated += future.result()
+            try:
+                updated, tagged = future.result()
+                total_updated += updated
+                total_tagged += tagged
+            except Exception:
+                # Fail fast on the first error: cancel pending work
+                # so we stop issuing new API calls, then re-raise.
+                # In-flight workers cannot be interrupted and will
+                # finish before the Lambda invocation ends. Retries
+                # are intentionally not implemented — the operator
+                # should be alerted and fix the root cause so every
+                # log group is processed on the next run.
+                for f in futures:
+                    f.cancel()
+                raise
 
-    LOG.info("Done. Updated %d log group(s).", total_updated)
-    return {"updated": total_updated}
+    LOG.info(
+        "Done. Updated %d log group(s), tagged %d for Vanta exclusion.",
+        total_updated,
+        total_tagged,
+    )
+    return {"updated": total_updated, "tagged": total_tagged}
