@@ -11,13 +11,23 @@ data "aws_iam_policy_document" "enforce_log_retention" {
   }
 
   statement {
-    sid    = "GetGovernedRegions"
+    sid    = "ListLandingZones"
     effect = "Allow"
     actions = [
       "controltower:ListLandingZones",
-      "controltower:GetLandingZone",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid    = "GetLandingZone"
+    effect = "Allow"
+    actions = [
+      "controltower:GetLandingZone",
+    ]
+    resources = [
+      "arn:aws:controltower:*:*:landingzone/*",
+    ]
   }
 
   statement {
