@@ -56,7 +56,7 @@ resource "aws_iam_policy" "enforce_log_retention" {
 module "enforce_log_retention" {
   count   = var.enforce_log_retention ? 1 : 0
   source  = "registry.infrahouse.com/infrahouse/lambda-monitored/aws"
-  version = "1.0.4"
+  version = "1.1.0"
 
   function_name     = "enforce-log-retention"
   lambda_source_dir = "${path.module}/lambda/enforce_log_retention"
@@ -64,12 +64,15 @@ module "enforce_log_retention" {
   source_code_files = ["handler.py"]
   timeout           = 900
   memory_size       = 1024
-  alarm_emails      = var.alarm_emails
+
+  alarm_emails                         = var.alarm_emails
+  memory_utilization_threshold_percent = 80
 
   environment_variables = {
-    RETENTION_DAYS     = tostring(var.cloudwatch_retention_days)
-    LOG_GROUP_PREFIXES = jsonencode(var.enforce_log_retention_prefixes)
-    ASSUME_ROLE_NAME   = var.enforce_log_retention_role_name
+    RETENTION_DAYS            = tostring(var.cloudwatch_retention_days)
+    LOG_GROUP_PREFIXES        = jsonencode(var.enforce_log_retention_prefixes)
+    ASSUME_ROLE_NAME          = var.enforce_log_retention_role_name
+    CONTROL_TOWER_HOME_REGION = coalesce(var.control_tower_home_region, data.aws_region.current.region)
   }
 
   additional_iam_policy_arns = [

@@ -74,7 +74,7 @@ Full documentation is available on
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_enforce_log_retention"></a> [enforce\_log\_retention](#module\_enforce\_log\_retention) | registry.infrahouse.com/infrahouse/lambda-monitored/aws | 1.0.4 |
+| <a name="module_enforce_log_retention"></a> [enforce\_log\_retention](#module\_enforce\_log\_retention) | registry.infrahouse.com/infrahouse/lambda-monitored/aws | 1.1.0 |
 
 ## Resources
 
@@ -86,6 +86,7 @@ Full documentation is available on
 | [aws_lambda_permission.enforce_log_retention](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_iam_policy_document.enforce_log_retention](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_organizations_organization.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/organizations_organization) | data source |
+| [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
 ## Inputs
 
@@ -93,6 +94,7 @@ Full documentation is available on
 |------|-------------|------|---------|:--------:|
 | <a name="input_alarm_emails"></a> [alarm\_emails](#input\_alarm\_emails) | List of email addresses to receive Lambda alarm notifications. | `list(string)` | n/a | yes |
 | <a name="input_cloudwatch_retention_days"></a> [cloudwatch\_retention\_days](#input\_cloudwatch\_retention\_days) | Desired retention in days for CloudWatch log groups created<br/>implicitly by AWS services. The Lambda will set retention to<br/>this value on any matching log group. | `number` | `365` | no |
+| <a name="input_control_tower_home_region"></a> [control\_tower\_home\_region](#input\_control\_tower\_home\_region) | AWS region where the Control Tower landing zone is configured<br/>(its "home" region). Control Tower APIs are regional and only<br/>return the landing zone in its home region. Defaults to null,<br/>in which case the Lambda's own region is used — set this only<br/>when the Lambda runs in a different region than Control Tower. | `string` | `null` | no |
 | <a name="input_enforce_log_retention"></a> [enforce\_log\_retention](#input\_enforce\_log\_retention) | Enable the scheduled Lambda that enforces minimum CloudWatch<br/>log group retention across all organization accounts. | `bool` | `true` | no |
 | <a name="input_enforce_log_retention_prefixes"></a> [enforce\_log\_retention\_prefixes](#input\_enforce\_log\_retention\_prefixes) | Log group name prefixes to target for retention enforcement.<br/>Only log groups matching these prefixes will be updated. | `list(string)` | <pre>[<br/>  "/aws/lambda/aws-controltower-",<br/>  "/aws/guardduty/",<br/>  "StackSet-AWSControlTowerBP-"<br/>]</pre> | no |
 | <a name="input_enforce_log_retention_role_name"></a> [enforce\_log\_retention\_role\_name](#input\_enforce\_log\_retention\_role\_name) | Name of the cross-account IAM role the Lambda assumes in each<br/>member account to enforce log retention. The role must exist in<br/>every scanned account and trust the management account root.<br/>Defaults to InfraHouseLogRetention, provisioned by<br/>terraform-aws-iso27001. | `string` | `"InfraHouseLogRetention"` | no |
