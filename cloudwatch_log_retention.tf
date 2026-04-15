@@ -38,8 +38,11 @@ data "aws_iam_policy_document" "enforce_log_retention" {
       "sts:AssumeRole",
     ]
     # Wildcard account ID is intentional: the target role's trust
-    # policy is the real access boundary. Enumerating org account IDs
-    # here would force a policy update on every account change.
+    # policy gates *who* can assume, and its attached policy gates
+    # *what* they can do (logs:PutRetentionPolicy for the retention
+    # pass, logs:TagResource/ListTagsForResource/UntagResource for
+    # the Vanta pass). Enumerating org account IDs here would force
+    # a policy update on every account change.
     resources = [
       "arn:aws:iam::*:role/${var.enforce_log_retention_role_name}",
     ]

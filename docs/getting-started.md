@@ -5,8 +5,13 @@
 - **Terraform** >= 1.5
 - **AWS Provider** >= 6.0, < 7.0
 - Access to the **AWS Organizations management account**
-- The `InfraHouseLogRetention` role must exist in member accounts
-  (provisioned by [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001))
+- The `InfraHouseLogRetention` role must exist in member accounts,
+  provisioned by [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001)
+  **>= 2.0.1**. Earlier versions of iso27001 grant only
+  `logs:PutRetentionPolicy` / `logs:DescribeLogGroups`, which is not
+  enough for the Vanta-exclusion tagging pass — the daily run will
+  fail with `AccessDeniedException` on `logs:ListTagsForResource` /
+  `logs:TagResource` / `logs:UntagResource`.
 
 ## First Deployment
 
