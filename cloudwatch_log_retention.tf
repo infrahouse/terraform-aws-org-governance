@@ -15,6 +15,7 @@ data "aws_iam_policy_document" "enforce_log_retention" {
     effect = "Allow"
     actions = [
       "controltower:ListLandingZones",
+      "controltower:ListEnabledBaselines",
     ]
     resources = ["*"]
   }
@@ -73,6 +74,7 @@ module "enforce_log_retention" {
     LOG_GROUP_PREFIXES        = jsonencode(var.enforce_log_retention_prefixes)
     ASSUME_ROLE_NAME          = var.enforce_log_retention_role_name
     CONTROL_TOWER_HOME_REGION = coalesce(var.control_tower_home_region, data.aws_region.current.region)
+    EXCLUDED_ACCOUNTS         = jsonencode(var.enforce_log_retention_excluded_accounts)
   }
 
   additional_iam_policy_arns = [

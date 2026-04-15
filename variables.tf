@@ -76,6 +76,20 @@ variable "control_tower_home_region" {
   default     = null
 }
 
+variable "enforce_log_retention_excluded_accounts" {
+  description = <<-EOT
+    List of AWS account IDs to skip during log retention
+    enforcement. Use this for accounts that are part of the
+    organization but intentionally not managed by this module
+    (e.g., accounts owned by external parties, sandbox accounts
+    with no compliance requirement). Excluded accounts are
+    skipped in addition to any account that is not enrolled in
+    Control Tower.
+  EOT
+  type        = list(string)
+  default     = []
+}
+
 variable "enforce_log_retention_schedule" {
   description = <<-EOT
     EventBridge schedule expression for the log retention
