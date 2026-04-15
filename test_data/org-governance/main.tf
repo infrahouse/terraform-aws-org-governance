@@ -17,6 +17,9 @@ module "org_governance" {
   # CI runs in us-east-1 but the test org's Control Tower landing
   # zone is homed in us-west-1.
   control_tower_home_region = "us-west-1"
+  # Fake account ID to exercise the exclude-list code path. The
+  # Lambda should log a skip for this ID without attempting AssumeRole.
+  enforce_log_retention_excluded_accounts = ["000000000000"]
 }
 
 output "enforce_log_retention_function_name" {

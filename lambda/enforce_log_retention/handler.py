@@ -39,6 +39,31 @@ def _get_active_account_ids() -> list[str]:
     return account_ids
 
 
+def _get_ct_enrolled_account_ids(home_region: str) -> set[str]:
+    """Return account IDs governed by Control Tower baselines.
+
+    An account is "governed" if at least one enabled baseline targets
+    it — either directly (e.g., AuditBaseline on the Audit account,
+    LogArchiveBaseline on the Log Archive account) or via inheritance
+    from its parent OU (AWSControlTowerBaseline on a registered OU
+    propagates to each member account as a child baseline, surfaced
+    by includeChildren=True). Accounts in the organization but
+    outside CT's scope — e.g., externally-owned accounts that were
+    never enrolled — have no enabled baselines and are excluded.
+    """
+    ct = boto3.client("controltower", region_name=home_region)
+    enrolled: set[str] = set()
+    paginator = ct.get_paginator("list_enabled_baselines")
+    for page in paginator.paginate(includeChildren=True):
+        for eb in page["enabledBaselines"]:
+            target = eb["targetIdentifier"]
+            # OU targets are the parents of the per-account children
+            # we get via includeChildren — we only want the accounts.
+            if ":account/" in target:
+                enrolled.add(target.rsplit("/", 1)[-1])
+    return enrolled
+
+
 def _get_governed_regions() -> list[str]:
     """Return region names governed by the Control Tower landing zone.
 
@@ -54,12 +79,10 @@ def _get_governed_regions() -> list[str]:
     )
     landing_zones = ct.list_landing_zones()["landingZones"]
     if not landing_zones:
-        raise RuntimeError(
-            "No Control Tower landing zone found in this account"
-        )
-    lz = ct.get_landing_zone(
-        landingZoneIdentifier=landing_zones[0]["arn"]
-    )["landingZone"]
+        raise RuntimeError("No Control Tower landing zone found in this account")
+    lz = ct.get_landing_zone(landingZoneIdentifier=landing_zones[0]["arn"])[
+        "landingZone"
+    ]
     return list(lz["manifest"]["governedRegions"])
 
 
@@ -78,14 +101,11 @@ def _enforce_in_account_region(
     )
     updated = 0
     for pfx in prefixes:
-        for lg in CloudWatchLogGroup.list_log_groups(
-            prefix=pfx, session=session
-        ):
+        for lg in CloudWatchLogGroup.list_log_groups(prefix=pfx, session=session):
             current = lg.retention_in_days
             if current != retention_days:
                 LOG.info(
-                    "Account %s %s: updating %s "
-                    "retention from %s to %d days",
+                    "Account %s %s: updating %s " "retention from %s to %d days",
                     account_id,
                     region,
                     lg.log_group_name,
@@ -102,8 +122,27 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     retention_days = int(os.environ["RETENTION_DAYS"])
     prefixes = json.loads(os.environ["LOG_GROUP_PREFIXES"])
     role_name = os.environ["ASSUME_ROLE_NAME"]
+    home_region = os.environ["CONTROL_TOWER_HOME_REGION"]
+    excluded = set(json.loads(os.environ.get("EXCLUDED_ACCOUNTS", "[]")))
 
-    account_ids = _get_active_account_ids()
+    active_accounts = set(_get_active_account_ids())
+    enrolled_accounts = _get_ct_enrolled_account_ids(home_region)
+    unenrolled = active_accounts - enrolled_accounts
+    if unenrolled:
+        LOG.info(
+            "Skipping %d account(s) not enrolled in Control Tower: %s",
+            len(unenrolled),
+            sorted(unenrolled),
+        )
+    explicitly_excluded = active_accounts & excluded
+    if explicitly_excluded:
+        LOG.info(
+            "Skipping %d account(s) from excluded_accounts: %s",
+            len(explicitly_excluded),
+            sorted(explicitly_excluded),
+        )
+
+    account_ids = sorted((active_accounts & enrolled_accounts) - excluded)
     regions = _get_governed_regions()
     LOG.info(
         "Scanning %d accounts across %d regions (%d workers)",
