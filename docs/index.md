@@ -25,7 +25,7 @@ This module provides a centralized deployment model for those tasks.
 ```hcl
 module "org_governance" {
   source  = "registry.infrahouse.com/infrahouse/org-governance/aws"
-  version = "0.2.1"
+  version = "0.3.0"
 
   alarm_emails = ["security@example.com"]
 }
