@@ -42,7 +42,7 @@ cross-account roles into member accounts or calling AWS Organizations APIs.
 ```hcl
 module "org_governance" {
   source  = "registry.infrahouse.com/infrahouse/org-governance/aws"
-  version = "0.3.0"
+  version = "0.4.0"
 
   alarm_emails = ["security@example.com"]
 }
