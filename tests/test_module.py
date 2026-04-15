@@ -15,7 +15,9 @@ from tests.conftest import (
     TERRAFORM_ROOT_DIR,
 )
 
-TEST_LOG_GROUP = "/aws/lambda/aws-controltower-test-retention"
+TEST_RETENTION_LOG_GROUP = "/test/retention/enforce-test"
+TEST_VANTA_LOG_GROUP = "/aws/lambda/aws-controltower-test-retention"
+VANTA_NO_ALERT_TAG = "VantaNoAlert"
 
 # Valid CloudWatch retention values excluding 365 (the usual default)
 VALID_RETENTION_DAYS = [
@@ -126,20 +128,39 @@ def test_module(
         )
         ct_logs = ct_session.client("logs")
         # Use a retention different from the target so the Lambda
-        # must update it
+        # must update the retention-pass group, and so we can prove
+        # the vanta-pass group was left alone.
         initial_retention = 14 if target_retention != 14 else 7
-        ct_logs.create_log_group(logGroupName=TEST_LOG_GROUP)
+
+        # Group 1: matches enforce_log_retention_prefixes — the
+        # retention pass must rewrite it to target_retention.
+        ct_logs.create_log_group(logGroupName=TEST_RETENTION_LOG_GROUP)
         ct_logs.put_retention_policy(
-            logGroupName=TEST_LOG_GROUP,
+            logGroupName=TEST_RETENTION_LOG_GROUP,
+            retentionInDays=initial_retention,
+        )
+        # Group 2: matches vanta_exclude_prefixes — the vanta pass
+        # must tag it with VantaNoAlert, and the retention pass must
+        # NOT touch it (regression guard against the two lists
+        # cross-contaminating).
+        ct_logs.create_log_group(logGroupName=TEST_VANTA_LOG_GROUP)
+        ct_logs.put_retention_policy(
+            logGroupName=TEST_VANTA_LOG_GROUP,
             retentionInDays=initial_retention,
         )
         try:
-            lg = CloudWatchLogGroup(TEST_LOG_GROUP, session=ct_session)
-            assert lg.retention_in_days == initial_retention
+            retention_lg = CloudWatchLogGroup(
+                TEST_RETENTION_LOG_GROUP, session=ct_session
+            )
+            vanta_lg = CloudWatchLogGroup(TEST_VANTA_LOG_GROUP, session=ct_session)
+            assert retention_lg.retention_in_days == initial_retention
+            assert vanta_lg.retention_in_days == initial_retention
+            assert VANTA_NO_ALERT_TAG not in vanta_lg.tags
             LOG.info(
-                "Before: %s has %d-day retention",
-                TEST_LOG_GROUP,
-                lg.retention_in_days,
+                "Before: retention=%d on both %s and %s",
+                initial_retention,
+                TEST_RETENTION_LOG_GROUP,
+                TEST_VANTA_LOG_GROUP,
             )
 
             # Invoke the Lambda (may take minutes scanning all regions)
@@ -157,14 +178,27 @@ def test_module(
             assert invoke_response["StatusCode"] == 200
             assert "FunctionError" not in invoke_response
 
-            # Verify retention was updated to target
-            assert lg.retention_in_days == target_retention
+            # Retention pass: rewrote the retention group.
+            assert retention_lg.retention_in_days == target_retention
             LOG.info(
-                "After: %s has %d-day retention",
-                TEST_LOG_GROUP,
-                lg.retention_in_days,
+                "After retention pass: %s has %d-day retention",
+                TEST_RETENTION_LOG_GROUP,
+                retention_lg.retention_in_days,
+            )
+
+            # Vanta pass: tagged the CT group, and the retention
+            # pass did not leak onto it.
+            assert VANTA_NO_ALERT_TAG in vanta_lg.tags
+            assert vanta_lg.retention_in_days == initial_retention
+            LOG.info(
+                "After vanta pass: %s has tag %s=%s, retention unchanged at %d",
+                TEST_VANTA_LOG_GROUP,
+                VANTA_NO_ALERT_TAG,
+                vanta_lg.tags[VANTA_NO_ALERT_TAG],
+                vanta_lg.retention_in_days,
             )
         finally:
-            # Clean up the test log group
-            LOG.info("Cleaning up %s", TEST_LOG_GROUP)
-            ct_logs.delete_log_group(logGroupName=TEST_LOG_GROUP)
+            LOG.info("Cleaning up %s", TEST_RETENTION_LOG_GROUP)
+            ct_logs.delete_log_group(logGroupName=TEST_RETENTION_LOG_GROUP)
+            LOG.info("Cleaning up %s", TEST_VANTA_LOG_GROUP)
+            ct_logs.delete_log_group(logGroupName=TEST_VANTA_LOG_GROUP)

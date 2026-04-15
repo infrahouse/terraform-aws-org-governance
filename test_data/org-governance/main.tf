@@ -14,6 +14,10 @@ module "org_governance" {
   # execution role. Real users should stick with the default
   # InfraHouseLogRetention role provisioned by terraform-aws-iso27001.
   enforce_log_retention_role_name = "AWSControlTowerExecution"
+  # Exercise the retention pass with a synthetic prefix the test
+  # owns. Default is empty since real retention enforcement is
+  # meant to be handled by the owning module at creation time.
+  enforce_log_retention_prefixes = ["/test/retention/"]
   # CI runs in us-east-1 but the test org's Control Tower landing
   # zone is homed in us-west-1.
   control_tower_home_region = "us-west-1"
