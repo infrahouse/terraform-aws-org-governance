@@ -77,6 +77,27 @@ variable "vanta_exclude_prefixes" {
   ]
 }
 
+variable "vanta_exclude_tag_value" {
+  description = <<-EOT
+    Value to write for the VantaNoAlert tag on newly tagged log groups.
+    Vanta only checks key presence, so the value can document the
+    exclusion reason (e.g. "CT-managed, retention enforced by guardrail").
+    Pre-existing values are never overwritten.
+  EOT
+  type        = string
+  default     = "true"
+
+  validation {
+    condition     = length(var.vanta_exclude_tag_value) <= 256
+    error_message = "Tag value must be 256 characters or fewer."
+  }
+
+  validation {
+    condition     = can(regex("^[\\w\\s+=.,:/@-]*$", var.vanta_exclude_tag_value))
+    error_message = "Tag value may only contain letters, digits, spaces, and + - = . _ : / @ characters."
+  }
+}
+
 variable "enforce_log_retention_role_name" {
   description = <<-EOT
     Name of the cross-account IAM role the Lambda assumes in each

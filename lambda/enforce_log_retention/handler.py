@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import boto3
+from botocore.exceptions import ClientError
 from infrahouse_core.aws import get_session
 from infrahouse_core.aws.cloudwatch_log_group import CloudWatchLogGroup
 from infrahouse_core.logging import setup_logging
@@ -33,15 +34,20 @@ from infrahouse_core.logging import setup_logging
 LOG = logging.getLogger(__name__)
 setup_logging(LOG)
 
+# High enough to parallelize across accounts/regions, low enough to stay
+# within Lambda's single-vCPU, 1024-fd limit, and STS rate limits.
 MAX_WORKERS = 20
 
 VANTA_EXCLUDE_TAG_KEY = "VantaNoAlert"
-VANTA_EXCLUDE_TAG_VALUE = "true"
 
 
 def _get_active_account_ids() -> list[str]:
-    """Return account IDs of all ACTIVE organization members."""
-    org = boto3.client("organizations")
+    """Return account IDs of all ACTIVE organization members.
+
+    :return: List of 12-digit AWS account ID strings.
+    :rtype: list[str]
+    """
+    org = boto3.client("organizations", region_name="us-east-1")
     account_ids = []
     paginator = org.get_paginator("list_accounts")
     for page in paginator.paginate():
@@ -62,6 +68,11 @@ def _get_ct_enrolled_account_ids(home_region: str) -> set[str]:
     by includeChildren=True). Accounts in the organization but
     outside CT's scope — e.g., externally-owned accounts that were
     never enrolled — have no enabled baselines and are excluded.
+
+    :param home_region: Control Tower home region.
+    :type home_region: str
+    :return: Set of 12-digit AWS account ID strings.
+    :rtype: set[str]
     """
     ct = boto3.client("controltower", region_name=home_region)
     enrolled: set[str] = set()
@@ -82,6 +93,9 @@ def _get_governed_regions() -> list[str]:
     Scoping to governed regions (instead of every enabled region in the
     caller account) avoids hitting opt-in regions where STS endpoints
     are unreachable from the Lambda's network.
+
+    :return: List of AWS region name strings.
+    :rtype: list[str]
     """
     # Control Tower APIs are regional — the landing zone is only
     # visible in its home region, which may differ from the Lambda's
@@ -105,7 +119,21 @@ def _retention_pass(
     retention_prefixes: list[str],
     retention_days: int,
 ) -> int:
-    """Enforce retention in one account+region. Returns update count."""
+    """Enforce retention in one account+region.
+
+    :param account_id: 12-digit AWS account ID.
+    :type account_id: str
+    :param region: AWS region name.
+    :type region: str
+    :param role_name: IAM role name to assume in the target account.
+    :type role_name: str
+    :param retention_prefixes: Log group name prefixes to match.
+    :type retention_prefixes: list[str]
+    :param retention_days: Desired retention period in days.
+    :type retention_days: int
+    :return: Number of log groups updated.
+    :rtype: int
+    """
     session = get_session(
         role_arn=f"arn:aws:iam::{account_id}:role/{role_name}",
         region=region,
@@ -134,12 +162,30 @@ def _vanta_pass(
     region: str,
     role_name: str,
     prefixes: list[str],
+    tag_value: str,
 ) -> int:
     """Tag Vanta-excluded log groups in one account+region.
+
+    The assumed role must have ``logs:TagResource`` and
+    ``logs:ListTagsForResource`` in addition to the retention
+    permissions.
 
     Checks for *presence* of the ``VantaNoAlert`` key rather than
     value equality: Vanta only cares that the key exists, so any
     pre-existing value is honored and never overwritten.
+
+    :param account_id: 12-digit AWS account ID.
+    :type account_id: str
+    :param region: AWS region name.
+    :type region: str
+    :param role_name: IAM role name to assume in the target account.
+    :type role_name: str
+    :param prefixes: Log group name prefixes to match.
+    :type prefixes: list[str]
+    :param tag_value: Value to write for new VantaNoAlert tags.
+    :type tag_value: str
+    :return: Number of log groups tagged.
+    :rtype: int
     """
     session = get_session(
         role_arn=f"arn:aws:iam::{account_id}:role/{role_name}",
@@ -150,7 +196,15 @@ def _vanta_pass(
     for pfx in prefixes:
         for lg in CloudWatchLogGroup.list_log_groups(prefix=pfx, session=session):
             if VANTA_EXCLUDE_TAG_KEY not in lg.tags:
-                lg.set_tag(VANTA_EXCLUDE_TAG_KEY, VANTA_EXCLUDE_TAG_VALUE)
+                lg.set_tag(VANTA_EXCLUDE_TAG_KEY, tag_value)
+                LOG.info(
+                    "Account %s %s: tagged %s with %s=%s",
+                    account_id,
+                    region,
+                    lg.log_group_name,
+                    VANTA_EXCLUDE_TAG_KEY,
+                    tag_value,
+                )
                 tagged += 1
     return tagged
 
@@ -164,10 +218,29 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     Vanta tagging is cosmetic (it only hides false positives in
     Vanta's alert feed) and runs best-effort — per-worker exceptions
     are logged and counted, but do not halt the phase.
+
+    :param event: Lambda event payload (unused).
+    :type event: dict[str, Any]
+    :param context: Lambda runtime context.
+    :type context: Any
+    :return: Counts of updated, tagged, and errored log groups.
+    :rtype: dict[str, int]
     """
+    required_vars = [
+        "RETENTION_DAYS",
+        "LOG_GROUP_PREFIXES",
+        "ASSUME_ROLE_NAME",
+        "CONTROL_TOWER_HOME_REGION",
+        "VANTA_EXCLUDE_TAG_VALUE",
+    ]
+    missing = [v for v in required_vars if v not in os.environ]
+    if missing:
+        raise RuntimeError(f"Required environment variable(s) not set: {', '.join(missing)}")
+
     retention_days = int(os.environ["RETENTION_DAYS"])
     retention_prefixes = json.loads(os.environ["LOG_GROUP_PREFIXES"])
     vanta_exclude_prefixes = json.loads(os.environ.get("VANTA_EXCLUDE_PREFIXES", "[]"))
+    vanta_tag_value = os.environ["VANTA_EXCLUDE_TAG_VALUE"]
     role_name = os.environ["ASSUME_ROLE_NAME"]
     home_region = os.environ["CONTROL_TOWER_HOME_REGION"]
     excluded = set(json.loads(os.environ.get("EXCLUDED_ACCOUNTS", "[]")))
@@ -218,7 +291,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
         for future in as_completed(futures):
             try:
                 total_updated += future.result()
-            except Exception:
+            except ClientError:
                 for f in futures:
                     f.cancel()
                 raise
@@ -236,6 +309,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
                 region,
                 role_name,
                 vanta_exclude_prefixes,
+                vanta_tag_value,
             ): (account_id, region)
             for account_id, region in targets
         }
@@ -243,7 +317,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
             account_id, region = futures[future]
             try:
                 total_tagged += future.result()
-            except Exception:
+            except ClientError:
                 LOG.exception(
                     "Vanta tagging failed for account %s region %s",
                     account_id,
