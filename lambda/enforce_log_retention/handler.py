@@ -217,7 +217,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     is the compliance-critical path and keeps fail-fast semantics;
     Vanta tagging is cosmetic (it only hides false positives in
     Vanta's alert feed) and runs best-effort — per-worker exceptions
-    are logged and counted, but do not halt the phase.
+    are logged and counted, but do not halt the phase. After all
+    workers finish, if any vanta errors occurred, the handler raises
+    ``RuntimeError`` so the Lambda reports failure.
 
     :param event: Lambda event payload (unused).
     :type event: dict[str, Any]
@@ -225,6 +227,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     :type context: Any
     :return: Counts of updated, tagged, and errored log groups.
     :rtype: dict[str, int]
+    :raises RuntimeError: If any Vanta tagging errors occurred.
     """
     required_vars = [
         "RETENTION_DAYS",
@@ -296,9 +299,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
                     f.cancel()
                 raise
 
-    # Phase 2: Vanta tagging — best-effort. A failure here does not
-    # change compliance posture (retention is already enforced), so
-    # log and continue instead of aborting the remaining workers.
+    # Phase 2: Vanta tagging — best-effort per worker. Individual
+    # failures don't abort remaining workers, but any errors cause
+    # the handler to raise after all workers finish.
     total_tagged = 0
     vanta_errors = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -332,6 +335,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
         total_tagged,
         vanta_errors,
     )
+    if vanta_errors:
+        raise RuntimeError(
+            f"Vanta tagging encountered {vanta_errors} error(s). "
+            f"Tagged {total_tagged} log group(s), updated retention on {total_updated}."
+        )
     return {
         "updated": total_updated,
         "tagged": total_tagged,
