@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-04-16
+
+### Bug Fixes
+
+- Raise on vanta tagging errors instead of returning success ([#7](https://github.com/infrahouse/terraform-aws-org-governance/issues/7))
+
 ## [0.5.0] - 2026-04-16
 
 ### Bug Fixes
