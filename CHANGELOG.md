@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-04-16
+
+### Bug Fixes
+
+- Harden handler error handling, docstrings, and configurable Vanta tag value
+
+### Documentation
+
+- Pin iso27001 >= 2.0.1 and clarify IAM boundary comment
+
+### Features
+
+- Tag Control Tower log groups with VantaNoAlert for compliance
+
+### Refactor
+
+- Run retention and vanta passes in independent phases
+
+### Testing
+
+- Bump infrahouse-core to 1.1 for lg.tags helper
+
 ## [0.4.0] - 2026-04-15
 
 ### Features
