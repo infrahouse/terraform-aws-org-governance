@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-04-28
+
+### Documentation
+
+- Clarify that InfraHouseLogRetention requires disabling phase 3
+
+### Features
+
+- Tag Control Tower Lambdas with VantaNoAlert; switch to InfraHouseGovernance role
+
 ## [0.5.1] - 2026-04-16
 
 ### Bug Fixes
