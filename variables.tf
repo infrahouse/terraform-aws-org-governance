@@ -77,6 +77,25 @@ variable "vanta_exclude_prefixes" {
   ]
 }
 
+variable "vanta_exclude_lambda_prefixes" {
+  description = <<-EOT
+    Lambda function name prefixes to tag with VantaNoAlert=true,
+    marking them out of scope for Vanta compliance tests. Use this
+    for Lambdas where Vanta findings (e.g., "Serverless function
+    error rate monitored (AWS)") cannot be remediated because the
+    Lambda is managed by AWS itself — Control Tower deploys
+    aws-controltower-NotificationForwarder into every governed
+    account/region and we cannot add CloudWatch alarms without
+    StackSet drift. Vanta honors the VantaNoAlert tag continuously
+    via its AWS integration. Applying is idempotent — already-
+    tagged functions are skipped.
+  EOT
+  type        = list(string)
+  default = [
+    "aws-controltower-",
+  ]
+}
+
 variable "vanta_exclude_tag_value" {
   description = <<-EOT
     Value to write for the VantaNoAlert tag on newly tagged log groups.
@@ -101,13 +120,17 @@ variable "vanta_exclude_tag_value" {
 variable "enforce_log_retention_role_name" {
   description = <<-EOT
     Name of the cross-account IAM role the Lambda assumes in each
-    member account to enforce log retention. The role must exist in
-    every scanned account and trust the management account root.
-    Defaults to InfraHouseLogRetention, provisioned by
-    terraform-aws-iso27001.
+    member account. The role must exist in every scanned account
+    and trust the management account root. Defaults to
+    InfraHouseGovernance (provisioned by terraform-aws-iso27001
+    >= 2.2.0), which carries permissions for both log-group
+    retention/tagging and Lambda function tagging. The variable
+    name retains the historical "log_retention" prefix; the role
+    is now the broader governance role and a future release will
+    rename the variable accordingly.
   EOT
   type        = string
-  default     = "InfraHouseLogRetention"
+  default     = "InfraHouseGovernance"
 }
 
 variable "control_tower_home_region" {

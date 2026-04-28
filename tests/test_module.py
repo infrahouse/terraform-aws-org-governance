@@ -1,11 +1,15 @@
+import io
 import json
 import random
+import time
+import zipfile
 from os import path as osp, remove
 from shutil import rmtree
 from textwrap import dedent
 
 import botocore.config
 import pytest
+from botocore.exceptions import ClientError
 from infrahouse_core.aws import get_session
 from infrahouse_core.aws.cloudwatch_log_group import CloudWatchLogGroup
 from pytest_infrahouse import terraform_apply
@@ -18,6 +22,9 @@ from tests.conftest import (
 TEST_RETENTION_LOG_GROUP = "/test/retention/enforce-test"
 TEST_VANTA_LOG_GROUP = "/aws/lambda/aws-controltower-test-retention"
 VANTA_NO_ALERT_TAG = "VantaNoAlert"
+LAMBDA_BASIC_EXEC_POLICY_ARN = (
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+)
 
 # Valid CloudWatch retention values excluding 365 (the usual default)
 VALID_RETENTION_DAYS = [
@@ -43,6 +50,96 @@ VALID_RETENTION_DAYS = [
     3288,
     3653,
 ]
+
+
+def _build_minimal_lambda_zip() -> bytes:
+    """Return a zip with a no-op Python handler suitable for create_function."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("handler.py", "def handler(event, context):\n    return {}\n")
+    return buf.getvalue()
+
+
+def _create_test_lambda(ct_session, function_name: str) -> dict:
+    """Create a synthetic Lambda function in the member account.
+
+    Returns a dict with the resources to clean up, suitable to pass
+    to :func:`_destroy_test_lambda`.
+    """
+    iam = ct_session.client("iam")
+    lam = ct_session.client("lambda")
+    role_name = f"{function_name}-exec"
+    trust_policy = json.dumps(
+        {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "lambda.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+    )
+    iam.create_role(
+        RoleName=role_name,
+        AssumeRolePolicyDocument=trust_policy,
+        Description="Temporary role for terraform-aws-org-governance test",
+    )
+    iam.attach_role_policy(
+        RoleName=role_name,
+        PolicyArn=LAMBDA_BASIC_EXEC_POLICY_ARN,
+    )
+    role_arn = iam.get_role(RoleName=role_name)["Role"]["Arn"]
+    # IAM role propagation to Lambda — empirically ~10s; retry with
+    # backoff to avoid flakes.
+    zip_bytes = _build_minimal_lambda_zip()
+    last_err = None
+    for attempt in range(6):
+        try:
+            lam.create_function(
+                FunctionName=function_name,
+                Runtime="python3.12",
+                Role=role_arn,
+                Handler="handler.handler",
+                Code={"ZipFile": zip_bytes},
+                PackageType="Zip",
+                Timeout=3,
+            )
+            break
+        except ClientError as err:
+            if err.response["Error"]["Code"] != "InvalidParameterValueException":
+                raise
+            last_err = err
+            time.sleep(5 * (attempt + 1))
+    else:
+        raise RuntimeError(
+            f"Lambda did not see role {role_arn} after retries: {last_err}"
+        )
+    return {"role_name": role_name, "function_name": function_name}
+
+
+def _destroy_test_lambda(ct_session, resources: dict) -> None:
+    iam = ct_session.client("iam")
+    lam = ct_session.client("lambda")
+    try:
+        lam.delete_function(FunctionName=resources["function_name"])
+    except ClientError as err:
+        if err.response["Error"]["Code"] != "ResourceNotFoundException":
+            LOG.warning("Failed to delete Lambda: %s", err)
+    try:
+        iam.detach_role_policy(
+            RoleName=resources["role_name"],
+            PolicyArn=LAMBDA_BASIC_EXEC_POLICY_ARN,
+        )
+    except ClientError as err:
+        if err.response["Error"]["Code"] != "NoSuchEntity":
+            LOG.warning("Failed to detach role policy: %s", err)
+    try:
+        iam.delete_role(RoleName=resources["role_name"])
+    except ClientError as err:
+        if err.response["Error"]["Code"] != "NoSuchEntity":
+            LOG.warning("Failed to delete role: %s", err)
 
 
 @pytest.mark.parametrize("aws_provider_version", ["~> 6.0"], ids=["aws-6"])
@@ -148,6 +245,12 @@ def test_module(
             logGroupName=TEST_VANTA_LOG_GROUP,
             retentionInDays=initial_retention,
         )
+        # Synthetic Lambda matching vanta_exclude_lambda_prefixes
+        # default (``aws-controltower-``). The Vanta Lambda pass must
+        # tag this function with VantaNoAlert.
+        test_lambda_name = f"aws-controltower-test-vanta-{random.randint(10000, 99999)}"
+        lambda_resources = _create_test_lambda(ct_session, test_lambda_name)
+        ct_lambda = ct_session.client("lambda")
         try:
             retention_lg = CloudWatchLogGroup(
                 TEST_RETENTION_LOG_GROUP, session=ct_session
@@ -197,8 +300,27 @@ def test_module(
                 vanta_lg.tags[VANTA_NO_ALERT_TAG],
                 vanta_lg.retention_in_days,
             )
+
+            # Vanta Lambda pass: tagged the synthetic Lambda matching
+            # the aws-controltower- prefix.
+            fn_arn = ct_lambda.get_function(FunctionName=test_lambda_name)[
+                "Configuration"
+            ]["FunctionArn"]
+            fn_tags = ct_lambda.list_tags(Resource=fn_arn).get("Tags", {})
+            assert VANTA_NO_ALERT_TAG in fn_tags, (
+                f"Expected {VANTA_NO_ALERT_TAG} on {test_lambda_name}, "
+                f"got tags: {fn_tags}"
+            )
+            LOG.info(
+                "After vanta lambda pass: %s has tag %s=%s",
+                test_lambda_name,
+                VANTA_NO_ALERT_TAG,
+                fn_tags[VANTA_NO_ALERT_TAG],
+            )
         finally:
             LOG.info("Cleaning up %s", TEST_RETENTION_LOG_GROUP)
             ct_logs.delete_log_group(logGroupName=TEST_RETENTION_LOG_GROUP)
             LOG.info("Cleaning up %s", TEST_VANTA_LOG_GROUP)
             ct_logs.delete_log_group(logGroupName=TEST_VANTA_LOG_GROUP)
+            LOG.info("Cleaning up Lambda %s", test_lambda_name)
+            _destroy_test_lambda(ct_session, lambda_resources)

@@ -90,4 +90,58 @@ enforce_log_retention_schedule = "rate(6 hours)"
 enforce_log_retention_schedule = "cron(0 0 * * ? *)"
 ```
 
+### `enforce_log_retention_role_name`
 
+Name of the cross-account IAM role the Lambda assumes in each member account.
+The role must exist in every scanned account and trust the management account
+root.
+
+- **Type**: `string`
+- **Default**: `"InfraHouseGovernance"`
+
+The default targets the `InfraHouseGovernance` role provisioned by
+[terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001)
+>= 2.2.0, which carries permissions for both log-group retention/tagging and
+Lambda function tagging. The variable name retains the historical
+`log_retention` prefix for backward compatibility; a future major release will
+rename it.
+
+### `vanta_exclude_prefixes`
+
+Log group name prefixes to tag with `VantaNoAlert=true`. Used for log groups
+where retention cannot be changed to satisfy a Vanta test (e.g., Control Tower
+managed log groups blocked by `GRLOGGROUPPOLICY`).
+
+- **Type**: `list(string)`
+- **Default**:
+    ```hcl
+    [
+      "/aws/lambda/aws-controltower-",
+      "StackSet-AWSControlTowerBP-",
+    ]
+    ```
+
+### `vanta_exclude_lambda_prefixes`
+
+Lambda function name prefixes to tag with `VantaNoAlert=true`. Used for Lambdas
+where Vanta findings (e.g., "Serverless function error rate monitored (AWS)")
+cannot be remediated because the Lambda is managed by AWS itself —
+`aws-controltower-NotificationForwarder` is deployed into every governed
+account/region, and we cannot add CloudWatch alarms without StackSet drift.
+
+- **Type**: `list(string)`
+- **Default**:
+    ```hcl
+    [
+      "aws-controltower-",
+    ]
+    ```
+
+### `vanta_exclude_tag_value`
+
+Value to write for the `VantaNoAlert` tag on newly tagged resources. Vanta only
+checks key presence, so the value can document the exclusion reason.
+Pre-existing values are never overwritten.
+
+- **Type**: `string`
+- **Default**: `"true"`

@@ -18,10 +18,20 @@ cross-account roles into member accounts or calling AWS Organizations APIs.
 
 - **CloudWatch Log Retention Enforcement** -- A Lambda function that enforces log retention
   policies across all member accounts. It lists accounts via `organizations:ListAccounts`,
-  assumes the `InfraHouseLogRetention` role (provisioned in each member account by
-  [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001)) across all
-  enabled regions, and sets retention on CloudWatch log groups matching configurable prefixes
-  (e.g., `aws-controltower` groups locked by Control Tower's mandatory SCP).
+  assumes the `InfraHouseGovernance` role (provisioned in each member account by
+  [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001) >= 2.2.0)
+  across all governed regions, and sets retention on CloudWatch log groups matching
+  configurable prefixes.
+- **Vanta Exclusion Tagging on Log Groups** -- Tags Control Tower-managed log groups
+  (matching `vanta_exclude_prefixes`) with `VantaNoAlert=true`. Used for log groups where
+  retention cannot be changed to satisfy a Vanta test because the GRLOGGROUPPOLICY
+  guardrail blocks `logs:PutRetentionPolicy` for any principal other than
+  `AWSControlTowerExecution`.
+- **Vanta Exclusion Tagging on Lambda Functions** -- Tags AWS-managed Lambda functions
+  (matching `vanta_exclude_lambda_prefixes`, default `aws-controltower-`) with
+  `VantaNoAlert=true`. Used for functions such as `aws-controltower-NotificationForwarder`
+  whose error rate is AWS's operational responsibility and cannot be alarmed without
+  StackSet drift.
 - **Management Account Deployment** -- Designed to run from the management account where
   AWS Organizations APIs are available.
 - **ISO 27001 Compliance** -- Enforces 365-day log retention to meet ISO 27001 and SOC 2
@@ -98,8 +108,9 @@ Full documentation is available on
 | <a name="input_enforce_log_retention"></a> [enforce\_log\_retention](#input\_enforce\_log\_retention) | Enable the scheduled Lambda that enforces minimum CloudWatch<br/>log group retention across all organization accounts. | `bool` | `true` | no |
 | <a name="input_enforce_log_retention_excluded_accounts"></a> [enforce\_log\_retention\_excluded\_accounts](#input\_enforce\_log\_retention\_excluded\_accounts) | List of AWS account IDs to skip during log retention<br/>enforcement. Use this for accounts that are part of the<br/>organization but intentionally not managed by this module<br/>(e.g., accounts owned by external parties, sandbox accounts<br/>with no compliance requirement). Excluded accounts are<br/>skipped in addition to any account that is not enrolled in<br/>Control Tower. | `list(string)` | `[]` | no |
 | <a name="input_enforce_log_retention_prefixes"></a> [enforce\_log\_retention\_prefixes](#input\_enforce\_log\_retention\_prefixes) | Log group name prefixes to target for retention enforcement.<br/>Only log groups matching these prefixes will have their<br/>retention updated. Defaults to an empty list — log groups that<br/>belong to other InfraHouse modules (e.g., GuardDuty scan<br/>events in terraform-aws-iso27001) should declare their own<br/>retention at creation time rather than relying on this Lambda<br/>to correct it after the fact. Control Tower log groups are<br/>intentionally not included here either — the GRLOGGROUPPOLICY<br/>guardrail denies logs:PutRetentionPolicy on *aws-controltower*<br/>log groups for any principal other than<br/>AWSControlTowerExecution, so they are handled via<br/>vanta\_exclude\_prefixes instead. | `list(string)` | `[]` | no |
-| <a name="input_enforce_log_retention_role_name"></a> [enforce\_log\_retention\_role\_name](#input\_enforce\_log\_retention\_role\_name) | Name of the cross-account IAM role the Lambda assumes in each<br/>member account to enforce log retention. The role must exist in<br/>every scanned account and trust the management account root.<br/>Defaults to InfraHouseLogRetention, provisioned by<br/>terraform-aws-iso27001. | `string` | `"InfraHouseLogRetention"` | no |
+| <a name="input_enforce_log_retention_role_name"></a> [enforce\_log\_retention\_role\_name](#input\_enforce\_log\_retention\_role\_name) | Name of the cross-account IAM role the Lambda assumes in each<br/>member account. The role must exist in every scanned account<br/>and trust the management account root. Defaults to<br/>InfraHouseGovernance (provisioned by terraform-aws-iso27001<br/>>= 2.2.0), which carries permissions for both log-group<br/>retention/tagging and Lambda function tagging. The variable<br/>name retains the historical "log\_retention" prefix; the role<br/>is now the broader governance role and a future release will<br/>rename the variable accordingly. | `string` | `"InfraHouseGovernance"` | no |
 | <a name="input_enforce_log_retention_schedule"></a> [enforce\_log\_retention\_schedule](#input\_enforce\_log\_retention\_schedule) | EventBridge schedule expression for the log retention<br/>enforcement Lambda. | `string` | `"rate(1 day)"` | no |
+| <a name="input_vanta_exclude_lambda_prefixes"></a> [vanta\_exclude\_lambda\_prefixes](#input\_vanta\_exclude\_lambda\_prefixes) | Lambda function name prefixes to tag with VantaNoAlert=true,<br/>marking them out of scope for Vanta compliance tests. Use this<br/>for Lambdas where Vanta findings (e.g., "Serverless function<br/>error rate monitored (AWS)") cannot be remediated because the<br/>Lambda is managed by AWS itself — Control Tower deploys<br/>aws-controltower-NotificationForwarder into every governed<br/>account/region and we cannot add CloudWatch alarms without<br/>StackSet drift. Vanta honors the VantaNoAlert tag continuously<br/>via its AWS integration. Applying is idempotent — already-<br/>tagged functions are skipped. | `list(string)` | <pre>[<br/>  "aws-controltower-"<br/>]</pre> | no |
 | <a name="input_vanta_exclude_prefixes"></a> [vanta\_exclude\_prefixes](#input\_vanta\_exclude\_prefixes) | Log group name prefixes to tag with VantaNoAlert=true, marking<br/>them out of scope for Vanta compliance tests. Use this for log<br/>groups where retention cannot be changed to satisfy a Vanta<br/>test (e.g., Control Tower managed log groups blocked by the<br/>GRLOGGROUPPOLICY SCP). Vanta honors the VantaNoAlert tag<br/>continuously via its AWS integration, so tagged resources are<br/>excluded from tests such as "Server logs retained for 365<br/>days (AWS)". Applying is idempotent — already-tagged groups<br/>are skipped. | `list(string)` | <pre>[<br/>  "/aws/lambda/aws-controltower-",<br/>  "StackSet-AWSControlTowerBP-"<br/>]</pre> | no |
 | <a name="input_vanta_exclude_tag_value"></a> [vanta\_exclude\_tag\_value](#input\_vanta\_exclude\_tag\_value) | Value to write for the VantaNoAlert tag on newly tagged log groups.<br/>Vanta only checks key presence, so the value can document the<br/>exclusion reason (e.g. "CT-managed, retention enforced by guardrail").<br/>Pre-existing values are never overwritten. | `string` | `"true"` | no |
 
