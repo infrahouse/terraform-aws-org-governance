@@ -75,11 +75,13 @@ module "enforce_log_retention" {
   environment_variables = {
     RETENTION_DAYS            = tostring(var.cloudwatch_retention_days)
     LOG_GROUP_PREFIXES        = jsonencode(var.enforce_log_retention_prefixes)
-    VANTA_EXCLUDE_PREFIXES    = jsonencode(var.vanta_exclude_prefixes)
-    VANTA_EXCLUDE_TAG_VALUE   = var.vanta_exclude_tag_value
     ASSUME_ROLE_NAME          = var.enforce_log_retention_role_name
     CONTROL_TOWER_HOME_REGION = coalesce(var.control_tower_home_region, data.aws_region.current.region)
     EXCLUDED_ACCOUNTS         = jsonencode(var.enforce_log_retention_excluded_accounts)
+
+    VANTA_EXCLUDE_LAMBDA_PREFIXES = jsonencode(var.vanta_exclude_lambda_prefixes)
+    VANTA_EXCLUDE_PREFIXES        = jsonencode(var.vanta_exclude_prefixes)
+    VANTA_EXCLUDE_TAG_VALUE       = var.vanta_exclude_tag_value
   }
 
   additional_iam_policy_arns = [

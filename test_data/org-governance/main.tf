@@ -12,7 +12,7 @@ module "org_governance" {
   # Test relies on AWSControlTowerExecution, which already exists in
   # every member account and (in this test org) trusts the Lambda's
   # execution role. Real users should stick with the default
-  # InfraHouseLogRetention role provisioned by terraform-aws-iso27001.
+  # InfraHouseGovernance role provisioned by terraform-aws-iso27001.
   enforce_log_retention_role_name = "AWSControlTowerExecution"
   # Exercise the retention pass with a synthetic prefix the test
   # owns. Default is empty since real retention enforcement is

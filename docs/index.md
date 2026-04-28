@@ -14,9 +14,13 @@ This module provides a centralized deployment model for those tasks.
 
 - **CloudWatch Log Retention Enforcement** -- A scheduled Lambda that scans all organization
   member accounts and enforces minimum log retention on CloudWatch log groups created by AWS
-  services (Control Tower, GuardDuty, etc.). Works around Control Tower's mandatory SCP
-  (`GRLOGGROUPPOLICY`) by assuming the least-privilege `InfraHouseLogRetention` role
-  provisioned by [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001).
+  services (Control Tower, GuardDuty, etc.). Assumes the least-privilege
+  `InfraHouseGovernance` role provisioned by
+  [terraform-aws-iso27001](https://github.com/infrahouse/terraform-aws-iso27001) >= 2.2.0.
+- **Vanta Exclusion Tagging** -- Tags Control Tower-managed log groups and AWS-managed
+  Lambda functions (e.g., `aws-controltower-NotificationForwarder`) with
+  `VantaNoAlert=true`, so Vanta excludes them from compliance tests we cannot remediate
+  (retention blocked by GRLOGGROUPPOLICY; CloudWatch alarms blocked by StackSet drift).
 - **ISO 27001 / SOC 2 Compliance** -- Enforces 365-day log retention by default.
 - **Multi-Region Support** -- Scans configurable regions across all active member accounts.
 

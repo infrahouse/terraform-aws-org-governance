@@ -1,22 +1,36 @@
 """Enforce CloudWatch log group compliance across the organization.
 
 Deployed in the management account, iterates over all organization
-member accounts and regions. Assumes the InfraHouseLogRetention role
-(provisioned by terraform-aws-iso27001 in each member account) to
-apply changes under least-privilege permissions.
+member accounts and regions. Assumes the InfraHouseGovernance role
+(provisioned by terraform-aws-iso27001 >= 2.2.0 in each member
+account) to apply changes under least-privilege permissions.
 
-Two passes run per account+region:
+Three passes run per account+region:
 
 1. Retention enforcement — for log groups matching
    ``LOG_GROUP_PREFIXES``, set ``retentionInDays`` to the configured
    value. Targets log groups implicitly created by AWS services
    (GuardDuty, ECS, etc.) and not managed by Terraform.
 
-2. Vanta exclusion tagging — for log groups matching
+2. Vanta exclusion tagging on log groups — for log groups matching
    ``VANTA_EXCLUDE_PREFIXES``, apply ``VantaNoAlert=true`` so Vanta
    marks them out of scope. Used for Control Tower managed log
    groups where the GRLOGGROUPPOLICY guardrail blocks retention
    changes for any principal other than AWSControlTowerExecution.
+
+3. Vanta exclusion tagging on Lambda functions — for Lambda
+   functions whose name matches ``VANTA_EXCLUDE_LAMBDA_PREFIXES``,
+   apply ``VantaNoAlert=true``. Used for AWS-managed functions
+   such as ``aws-controltower-NotificationForwarder`` where we
+   cannot add CloudWatch error alarms without StackSet drift, and
+   where error-rate monitoring is AWS's operational responsibility.
+
+This pass runs only against member accounts (the management
+account is never assumed into), so the orchestrator's own
+``enforce-log-retention`` Lambda is out of reach by construction.
+The default prefix (``aws-controltower-``) also does not match
+``enforce-log-retention``; do not broaden the prefix to a value
+that would tag the orchestrator itself.
 """
 
 import json
@@ -209,23 +223,86 @@ def _vanta_pass(
     return tagged
 
 
-def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
-    """Scan log groups across all accounts and regions.
+def _vanta_lambda_pass(
+    account_id: str,
+    region: str,
+    role_name: str,
+    prefixes: list[str],
+    tag_value: str,
+) -> int:
+    """Tag Vanta-excluded Lambda functions in one account+region.
 
-    Runs the two passes in separate ThreadPoolExecutor phases so a
+    Mirrors :func:`_vanta_pass` but operates on Lambda functions.
+    Skips any function that already carries the ``VantaNoAlert``
+    key with any value — Vanta only checks key presence, so any
+    pre-existing value is honored and never overwritten.
+
+    The assumed role must have ``lambda:ListFunctions``,
+    ``lambda:ListTags``, and ``lambda:TagResource``.
+
+    :param account_id: 12-digit AWS account ID.
+    :type account_id: str
+    :param region: AWS region name.
+    :type region: str
+    :param role_name: IAM role name to assume in the target account.
+    :type role_name: str
+    :param prefixes: Lambda function name prefixes to match.
+    :type prefixes: list[str]
+    :param tag_value: Value to write for new VantaNoAlert tags.
+    :type tag_value: str
+    :return: Number of Lambda functions tagged.
+    :rtype: int
+    """
+    if not prefixes:
+        return 0
+    session = get_session(
+        role_arn=f"arn:aws:iam::{account_id}:role/{role_name}",
+        region=region,
+        session_name="enforce-vanta-lambda-tags",
+    )
+    lam = session.client("lambda")
+    tagged = 0
+    paginator = lam.get_paginator("list_functions")
+    for page in paginator.paginate():
+        for fn in page["Functions"]:
+            name = fn["FunctionName"]
+            if not any(name.startswith(p) for p in prefixes):
+                continue
+            arn = fn["FunctionArn"]
+            existing = lam.list_tags(Resource=arn).get("Tags", {})
+            if VANTA_EXCLUDE_TAG_KEY in existing:
+                continue
+            lam.tag_resource(Resource=arn, Tags={VANTA_EXCLUDE_TAG_KEY: tag_value})
+            LOG.info(
+                "Account %s %s: tagged Lambda %s with %s=%s",
+                account_id,
+                region,
+                name,
+                VANTA_EXCLUDE_TAG_KEY,
+                tag_value,
+            )
+            tagged += 1
+    return tagged
+
+
+def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
+    """Scan log groups and Lambda functions across all accounts and regions.
+
+    Runs the three passes in separate ThreadPoolExecutor phases so a
     failure in one cannot cancel pending work in the other. Retention
     is the compliance-critical path and keeps fail-fast semantics;
     Vanta tagging is cosmetic (it only hides false positives in
     Vanta's alert feed) and runs best-effort — per-worker exceptions
     are logged and counted, but do not halt the phase. After all
-    workers finish, if any vanta errors occurred, the handler raises
-    ``RuntimeError`` so the Lambda reports failure.
+    workers finish, if any vanta errors occurred (in either tagging
+    phase), the handler raises ``RuntimeError`` so the Lambda
+    reports failure.
 
     :param event: Lambda event payload (unused).
     :type event: dict[str, Any]
     :param context: Lambda runtime context.
     :type context: Any
-    :return: Counts of updated, tagged, and errored log groups.
+    :return: Counts of updated, tagged, and errored resources.
     :rtype: dict[str, int]
     :raises RuntimeError: If any Vanta tagging errors occurred.
     """
@@ -238,11 +315,16 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
     ]
     missing = [v for v in required_vars if v not in os.environ]
     if missing:
-        raise RuntimeError(f"Required environment variable(s) not set: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Required environment variable(s) not set: {', '.join(missing)}"
+        )
 
     retention_days = int(os.environ["RETENTION_DAYS"])
     retention_prefixes = json.loads(os.environ["LOG_GROUP_PREFIXES"])
     vanta_exclude_prefixes = json.loads(os.environ.get("VANTA_EXCLUDE_PREFIXES", "[]"))
+    vanta_exclude_lambda_prefixes = json.loads(
+        os.environ.get("VANTA_EXCLUDE_LAMBDA_PREFIXES", "[]")
+    )
     vanta_tag_value = os.environ["VANTA_EXCLUDE_TAG_VALUE"]
     role_name = os.environ["ASSUME_ROLE_NAME"]
     home_region = os.environ["CONTROL_TOWER_HOME_REGION"]
@@ -299,9 +381,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
                     f.cancel()
                 raise
 
-    # Phase 2: Vanta tagging — best-effort per worker. Individual
-    # failures don't abort remaining workers, but any errors cause
-    # the handler to raise after all workers finish.
+    # Phase 2: Vanta log-group tagging — best-effort per worker.
+    # Individual failures don't abort remaining workers, but any
+    # errors cause the handler to raise after all workers finish.
     total_tagged = 0
     vanta_errors = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -328,20 +410,53 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, int]:
                 )
                 vanta_errors += 1
 
+    # Phase 3: Vanta Lambda-function tagging — same best-effort
+    # semantics as Phase 2.
+    total_tagged_lambdas = 0
+    vanta_lambda_errors = 0
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(
+                _vanta_lambda_pass,
+                account_id,
+                region,
+                role_name,
+                vanta_exclude_lambda_prefixes,
+                vanta_tag_value,
+            ): (account_id, region)
+            for account_id, region in targets
+        }
+        for future in as_completed(futures):
+            account_id, region = futures[future]
+            try:
+                total_tagged_lambdas += future.result()
+            except ClientError:
+                LOG.exception(
+                    "Vanta Lambda tagging failed for account %s region %s",
+                    account_id,
+                    region,
+                )
+                vanta_lambda_errors += 1
+
+    total_vanta_errors = vanta_errors + vanta_lambda_errors
     LOG.info(
-        "Done. Updated %d log group(s), tagged %d for Vanta exclusion "
-        "(%d vanta errors).",
+        "Done. Updated %d log group(s), tagged %d log group(s) and "
+        "%d Lambda function(s) for Vanta exclusion (%d vanta errors).",
         total_updated,
         total_tagged,
-        vanta_errors,
+        total_tagged_lambdas,
+        total_vanta_errors,
     )
-    if vanta_errors:
+    if total_vanta_errors:
         raise RuntimeError(
-            f"Vanta tagging encountered {vanta_errors} error(s). "
-            f"Tagged {total_tagged} log group(s), updated retention on {total_updated}."
+            f"Vanta tagging encountered {total_vanta_errors} error(s) "
+            f"({vanta_errors} on log groups, {vanta_lambda_errors} on Lambdas). "
+            f"Tagged {total_tagged} log group(s), {total_tagged_lambdas} Lambda(s), "
+            f"updated retention on {total_updated}."
         )
     return {
         "updated": total_updated,
-        "tagged": total_tagged,
-        "vanta_errors": vanta_errors,
+        "tagged_log_groups": total_tagged,
+        "tagged_lambdas": total_tagged_lambdas,
+        "vanta_errors": total_vanta_errors,
     }
