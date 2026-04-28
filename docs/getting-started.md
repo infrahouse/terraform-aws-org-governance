@@ -11,8 +11,15 @@
   `InfraHouseLogRetention`, which lacks the `lambda:ListFunctions` /
   `lambda:ListTags` / `lambda:TagResource` permissions required by
   the Vanta Lambda-tagging pass — the daily run will fail with
-  `AccessDeniedException`. To stay on `InfraHouseLogRetention` during
-  migration, override `enforce_log_retention_role_name`.
+  `AccessDeniedException` on every account/region. If you must
+  delay the iso27001 upgrade, you can pin to the old role by
+  setting **both** of the following — and the Vanta Lambda-tagging
+  pass will be disabled until you remove these overrides:
+
+    ```hcl
+    enforce_log_retention_role_name = "InfraHouseLogRetention"
+    vanta_exclude_lambda_prefixes   = []
+    ```
 
 ## First Deployment
 
