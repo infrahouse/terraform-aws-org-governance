@@ -185,7 +185,9 @@ variable "vanta_external_id" {
     SSM parameter (/vanta/external_id) to every member account via
     CloudFormation StackSet so that terraform-aws-iso27001 can read
     it locally without cross-account lookups.
+    Set to null to skip all Vanta resources.
   EOT
   type        = string
+  default     = null
   sensitive   = true
 }

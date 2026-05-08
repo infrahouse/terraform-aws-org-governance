@@ -12,8 +12,15 @@
 # The external ID (from "AWS accounts > Role Creation") is distributed to
 # member accounts via a CloudFormation StackSet so terraform-aws-iso27001
 # can read it locally and configure the trust policy.
+#
+# All resources are gated on var.vanta_external_id being set.
+
+locals {
+  vanta_enabled = var.vanta_external_id != null
+}
 
 resource "aws_ssm_parameter" "vanta_external_id" {
+  count = local.vanta_enabled ? 1 : 0
   name  = "/vanta/external_id"
   type  = "SecureString"
   value = var.vanta_external_id
@@ -22,6 +29,7 @@ resource "aws_ssm_parameter" "vanta_external_id" {
 }
 
 resource "aws_cloudformation_stack_set" "vanta_external_id" {
+  count            = local.vanta_enabled ? 1 : 0
   name             = "vanta-external-id"
   description      = "Distribute /vanta/external_id SSM parameter to all member accounts"
   permission_model = "SERVICE_MANAGED"
@@ -61,7 +69,8 @@ resource "aws_cloudformation_stack_set" "vanta_external_id" {
 }
 
 resource "aws_cloudformation_stack_set_instance" "vanta_external_id" {
-  stack_set_name = aws_cloudformation_stack_set.vanta_external_id.name
+  count          = local.vanta_enabled ? 1 : 0
+  stack_set_name = aws_cloudformation_stack_set.vanta_external_id[0].name
 
   deployment_targets {
     organizational_unit_ids = [data.aws_organizations_organization.current.roots[0].id]
@@ -73,6 +82,8 @@ resource "aws_cloudformation_stack_set_instance" "vanta_external_id" {
 # Deny statements are required by Vanta to block data-exfiltration actions
 # on the auditor role.
 data "aws_iam_policy_document" "vanta_sso_permissions" {
+  count = local.vanta_enabled ? 1 : 0
+
   statement {
     effect = "Allow"
     actions = [
@@ -103,8 +114,9 @@ data "aws_iam_policy_document" "vanta_sso_permissions" {
 }
 
 resource "aws_iam_policy" "vanta_sso_permissions" {
+  count  = local.vanta_enabled ? 1 : 0
   name   = "VantaManagementAccountPermissions"
-  policy = data.aws_iam_policy_document.vanta_sso_permissions.json
+  policy = data.aws_iam_policy_document.vanta_sso_permissions[0].json
 
   tags = local.default_module_tags
 }
@@ -112,6 +124,7 @@ resource "aws_iam_policy" "vanta_sso_permissions" {
 # Vanta "Management account > Role Creation" step — attach to the role
 # created by terraform-aws-iso27001.
 resource "aws_iam_role_policy_attachment" "vanta_sso_permissions" {
+  count      = local.vanta_enabled ? 1 : 0
   role       = var.vanta_auditor_role_name
-  policy_arn = aws_iam_policy.vanta_sso_permissions.arn
+  policy_arn = aws_iam_policy.vanta_sso_permissions[0].arn
 }
