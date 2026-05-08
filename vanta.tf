@@ -45,14 +45,14 @@ resource "aws_cloudformation_stack_set" "vanta_external_id" {
     AWSTemplateFormatVersion = "2010-09-09"
     Description              = "SSM parameter for Vanta external ID, managed by terraform-aws-org-governance"
     Parameters = {
-      ExternalId = { Type = "String", NoEcho = true }
+      ExternalId = { Type = "String" }
     }
     Resources = {
       VantaExternalId = {
         Type = "AWS::SSM::Parameter"
         Properties = {
           Name  = "/vanta/external_id"
-          Type  = "SecureString"
+          Type  = "String"
           Value = { Ref = "ExternalId" }
         }
       }
