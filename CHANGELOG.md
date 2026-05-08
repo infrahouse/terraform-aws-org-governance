@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-05-08
+
+### Bug Fixes
+
+- Use String type for SSM parameter in CloudFormation StackSet
+
 ## [0.7.0] - 2026-05-08
 
 ### Bug Fixes
