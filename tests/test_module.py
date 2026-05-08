@@ -172,6 +172,7 @@ def test_module(
         fp.write(dedent(f"""
                     region = "{aws_region}"
                     cloudwatch_retention_days = {target_retention}
+                    vanta_external_id = "test-external-id-do-not-use"
                     """))
         if test_role_arn:
             fp.write(dedent(f"""
