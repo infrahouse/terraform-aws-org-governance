@@ -3,18 +3,12 @@ variable "cloudwatch_retention_days" {
   default = 365
 }
 
-variable "vanta_external_id" {
-  type      = string
-  sensitive = true
-}
-
 module "org_governance" {
   source = "./../../"
   alarm_emails = [
     "security@example.com",
   ]
   cloudwatch_retention_days = var.cloudwatch_retention_days
-  vanta_external_id         = var.vanta_external_id
   # Test relies on AWSControlTowerExecution, which already exists in
   # every member account and (in this test org) trusts the Lambda's
   # execution role. Real users should stick with the default
