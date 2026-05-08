@@ -1,6 +1,6 @@
 resource "aws_ssm_parameter" "vanta_external_id" {
   name  = "/vanta/external_id"
-  type  = "String"
+  type  = "SecureString"
   value = var.vanta_external_id
 
   tags = local.default_module_tags
