@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-05-08
+
+### Bug Fixes
+
+- Use SecureString for SSM parameter, suppress CKV_AWS_356 for Identity Store
+- Suppress CKV_AWS_337 for SSM parameter — default aws/ssm key is sufficient
+- SecureString in StackSet template, add vanta_external_id to test root
+- Add vanta_external_id to generated test tfvars
+- Make Vanta resources conditional on vanta_external_id being set
+
+### Documentation
+
+- Trace vanta.tf resources back to Vanta setup wizard steps
+
+### Features
+
+- Add Vanta auditor role support and StackSet for external ID distribution
+
 ## [0.6.0] - 2026-04-28
 
 ### Documentation
