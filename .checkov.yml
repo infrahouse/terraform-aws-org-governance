@@ -10,5 +10,10 @@ skip-check:
   # Identity Store actions do not support resource-level permissions — "*" is the only valid
   # resource. This policy is dictated by Vanta's integration requirements.
   - CKV_AWS_356
+
+  # CKV_AWS_337: SSM parameter uses SecureString with the default aws/ssm key.
+  # The Vanta external ID is a confused-deputy token, not a credential — default
+  # encryption is sufficient and avoids requiring a CMK dependency.
+  - CKV_AWS_337
 compact: true
 quiet: false
