@@ -5,5 +5,10 @@ skip-path:
 skip-check:
   - CKV_TF_1  # Module source version pinning - handled by Renovate
   - CKV_TF_2  # Module source version pinning - handled by Renovate
+
+  # CKV_AWS_356: vanta_sso_permissions policy uses "*" resource for identitystore:* actions.
+  # Identity Store actions do not support resource-level permissions — "*" is the only valid
+  # resource. This policy is dictated by Vanta's integration requirements.
+  - CKV_AWS_356
 compact: true
 quiet: false
