@@ -29,13 +29,15 @@ resource "aws_cloudformation_stack_set" "vanta_external_id" {
         Type = "AWS::SSM::Parameter"
         Properties = {
           Name  = "/vanta/external_id"
-          Type  = "String"
+          Type  = "SecureString"
           Value = { Ref = "ExternalId" }
         }
       }
     }
   })
 
+  # NoEcho hides the value in the CF console but DescribeStackSet still returns it in cleartext.
+  # Acceptable: the external ID is a confused-deputy token, not a credential.
   parameters = {
     ExternalId = var.vanta_external_id
   }
