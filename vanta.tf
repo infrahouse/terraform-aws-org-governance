@@ -1,3 +1,18 @@
+# Vanta integration for the management account.
+#
+# Implements steps from Vanta's "Connect AWS" wizard:
+#   - "Management account > Policy creation" — VantaManagementAccountPermissions
+#     (Identity Store read + data-exfiltration deny list)
+#   - "Management account > Role Creation" — the vanta-auditor role is created
+#     by terraform-aws-iso27001; this module only attaches the management-account
+#     policy to it
+#   - "IAM Identity Center" — Identity Store permissions let Vanta audit SSO
+#     users and groups (only meaningful in the management account)
+#
+# The external ID (from "AWS accounts > Role Creation") is distributed to
+# member accounts via a CloudFormation StackSet so terraform-aws-iso27001
+# can read it locally and configure the trust policy.
+
 resource "aws_ssm_parameter" "vanta_external_id" {
   name  = "/vanta/external_id"
   type  = "SecureString"
@@ -53,6 +68,10 @@ resource "aws_cloudformation_stack_set_instance" "vanta_external_id" {
   }
 }
 
+# Vanta "Management account > Policy creation" step.
+# Identity Store actions are management-account-only (IAM Identity Center).
+# Deny statements are required by Vanta to block data-exfiltration actions
+# on the auditor role.
 data "aws_iam_policy_document" "vanta_sso_permissions" {
   statement {
     effect = "Allow"
@@ -90,6 +109,8 @@ resource "aws_iam_policy" "vanta_sso_permissions" {
   tags = local.default_module_tags
 }
 
+# Vanta "Management account > Role Creation" step — attach to the role
+# created by terraform-aws-iso27001.
 resource "aws_iam_role_policy_attachment" "vanta_sso_permissions" {
   role       = var.vanta_auditor_role_name
   policy_arn = aws_iam_policy.vanta_sso_permissions.arn
