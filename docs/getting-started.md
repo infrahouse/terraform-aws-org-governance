@@ -30,7 +30,8 @@
       source  = "registry.infrahouse.com/infrahouse/org-governance/aws"
       version = "0.6.0"
 
-      alarm_emails = ["security@example.com"]
+      alarm_emails      = ["security@example.com"]
+      vanta_external_id = var.vanta_external_id
     }
     ```
 
@@ -49,6 +50,11 @@
       `InfraHouseGovernance` in each member account
     - CloudWatch alarms for Lambda errors (notifications sent to
       `alarm_emails`)
+    - An SSM parameter (`/vanta/external_id`) in the management account
+    - A CloudFormation StackSet that distributes `/vanta/external_id`
+      to all member accounts (auto-deploys to new accounts)
+    - An IAM policy attaching Identity Store read permissions to the
+      `vanta-auditor` role
 
 ## Verifying the Deployment
 

@@ -167,3 +167,25 @@ variable "enforce_log_retention_schedule" {
   type        = string
   default     = "rate(1 day)"
 }
+
+variable "vanta_auditor_role_name" {
+  description = <<-EOT
+    Name of the Vanta auditor IAM role in the management account.
+    The role is created by the terraform-aws-iso27001 module;
+    this module attaches the identitystore permissions to it.
+  EOT
+  type        = string
+  default     = "vanta-auditor"
+}
+
+variable "vanta_external_id" {
+  description = <<-EOT
+    External ID for the Vanta auditor role trust policy, provided
+    by Vanta when connecting an AWS organization. Distributed as an
+    SSM parameter (/vanta/external_id) to every member account via
+    CloudFormation StackSet so that terraform-aws-iso27001 can read
+    it locally without cross-account lookups.
+  EOT
+  type        = string
+  sensitive   = true
+}
