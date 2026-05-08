@@ -15,6 +15,21 @@ List of email addresses to receive Lambda alarm notifications.
 alarm_emails = ["security@example.com", "ops@example.com"]
 ```
 
+### `vanta_external_id`
+
+External ID for the Vanta auditor role trust policy, provided by Vanta when
+connecting an AWS organization. Distributed as an SSM parameter
+(`/vanta/external_id`) to every member account via CloudFormation StackSet so
+that terraform-aws-iso27001 can read it locally without cross-account lookups.
+
+- **Type**: `string`
+- **Required**: yes
+- **Sensitive**: yes
+
+```hcl
+vanta_external_id = var.vanta_external_id
+```
+
 ## Optional Variables
 
 ### `enforce_log_retention`
@@ -145,3 +160,12 @@ Pre-existing values are never overwritten.
 
 - **Type**: `string`
 - **Default**: `"true"`
+
+### `vanta_auditor_role_name`
+
+Name of the Vanta auditor IAM role in the management account. The role is
+created by terraform-aws-iso27001; this module attaches the Identity Store
+permissions to it.
+
+- **Type**: `string`
+- **Default**: `"vanta-auditor"`
