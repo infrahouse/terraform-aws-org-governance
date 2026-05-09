@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-05-09
+
+### Features
+
+- Add Vanta S3 CRR exemption reconciler
+
+### Styling
+
+- Combine split f-strings in handler
+
 ## [0.7.1] - 2026-05-08
 
 ### Bug Fixes
