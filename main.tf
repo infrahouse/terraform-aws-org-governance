@@ -1,5 +1,5 @@
 locals {
-  module_version = "0.7.1"
+  module_version = "0.8.0"
 
   default_module_tags = {
     created_by_module = "infrahouse/org-governance/aws"
