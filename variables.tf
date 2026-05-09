@@ -191,3 +191,21 @@ variable "vanta_external_id" {
   default     = null
   sensitive   = true
 }
+
+variable "vanta_api_secret_arn" {
+  description = <<-EOT
+    ARN of the Secrets Manager secret containing Vanta API credentials.
+    When set, enables the Vanta S3 CRR exemption reconciler Lambda.
+    Set to null to disable.
+
+    The secret value must be a JSON object:
+
+        {"client_id": "...", "client_secret": "..."}
+
+    Create an API client in the Vanta dashboard under
+    Settings > API > OAuth 2.0 Clients. The client needs scopes
+    vanta-api.all:read and vanta-api.all:write.
+  EOT
+  type        = string
+  default     = null
+}
