@@ -143,7 +143,7 @@ def handler(event: dict, context: object) -> dict:
         if tag_value:
             reason = f"{MANAGED_PREFIX} {tag_value}"
             requests.post(
-                f"{VANTA_BASE_URL}/tests/{TEST_ID}" f"/entities/{entity_id}/deactivate",
+                f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/deactivate",
                 headers=headers,
                 json={"deactivateReason": reason},
                 timeout=30,
@@ -163,7 +163,7 @@ def handler(event: dict, context: object) -> dict:
         tag_value = _get_bucket_tag(bucket_name, account_id, role_name)
         if tag_value is None:
             requests.post(
-                f"{VANTA_BASE_URL}/tests/{TEST_ID}" f"/entities/{entity_id}/reactivate",
+                f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/reactivate",
                 headers=headers,
                 timeout=30,
             ).raise_for_status()
