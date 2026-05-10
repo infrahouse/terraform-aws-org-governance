@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-05-10
+
+### Performance
+
+- Reuse STS sessions per account in S3 CRR reconciler
+
 ## [0.8.0] - 2026-05-09
 
 ### Features
