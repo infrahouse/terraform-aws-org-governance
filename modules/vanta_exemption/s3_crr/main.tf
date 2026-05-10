@@ -34,7 +34,7 @@ module "lambda" {
   handler           = "handler.handler"
   source_code_files = ["handler.py"]
   timeout           = 900
-  memory_size       = 256
+  memory_size       = 1024
 
   alarm_emails                         = var.alarm_emails
   memory_utilization_threshold_percent = 80

@@ -8,10 +8,12 @@ reactivated (drift correction).
 
 import logging
 import os
+from collections import defaultdict
 from typing import Optional
 
+import boto3
 import requests
-from infrahouse_core.aws import S3Bucket, Secret
+from infrahouse_core.aws import S3Bucket, Secret, get_session
 from infrahouse_core.logging import setup_logging
 
 LOG = logging.getLogger(__name__)
@@ -74,20 +76,17 @@ def _paginate_vanta(url: str, headers: dict, params: Optional[dict] = None) -> l
     return items
 
 
-def _get_bucket_tag(bucket_name: str, account_id: str, role_name: str) -> Optional[str]:
+def _get_bucket_tag(bucket_name: str, session: boto3.Session) -> Optional[str]:
     """Check if bucket has the exemption tag.
 
     :param bucket_name: S3 bucket name.
     :type bucket_name: str
-    :param account_id: 12-digit AWS account ID.
-    :type account_id: str
-    :param role_name: IAM role name to assume.
-    :type role_name: str
+    :param session: Boto3 session with credentials for the bucket's account.
+    :type session: boto3.Session
     :return: Tag value if present, None otherwise.
     :rtype: Optional[str]
     """
-    role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
-    return S3Bucket(bucket_name, role_arn=role_arn).tags.get(TAG_KEY)
+    return S3Bucket(bucket_name, session=session).tags.get(TAG_KEY)
 
 
 def handler(event: dict, context: object) -> dict:
@@ -135,44 +134,61 @@ def handler(event: dict, context: object) -> dict:
     bucket_account = {r["displayName"]: r["account"] for r in resources}
     LOG.info("Phase 1c: %d S3 resources in Vanta", len(bucket_account))
 
-    # Phase 2: deactivate failing entities that have the tag
-    deactivated_count = 0
+    # Build per-account bucket lists for Phases 2 and 3
+    failing_by_account = defaultdict(list)
     for bucket_name, entity_id in failing_map.items():
-        account_id = bucket_account[bucket_name]
-        tag_value = _get_bucket_tag(bucket_name, account_id, role_name)
-        if tag_value:
-            reason = f"{MANAGED_PREFIX} {tag_value}"
-            requests.post(
-                f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/deactivate",
-                headers=headers,
-                json={"deactivateReason": reason},
-                timeout=30,
-            ).raise_for_status()
-            LOG.info(
-                "Deactivated %s (%s): %s",
-                bucket_name,
-                entity_id,
-                reason,
-            )
-            deactivated_count += 1
-
-    # Phase 3: reactivate managed-deactivated entities whose tag was removed
-    reactivated_count = 0
+        failing_by_account[bucket_account[bucket_name]].append(
+            (bucket_name, entity_id)
+        )
+    deactivated_by_account = defaultdict(list)
     for bucket_name, entity_id in managed_deactivated.items():
-        account_id = bucket_account[bucket_name]
-        tag_value = _get_bucket_tag(bucket_name, account_id, role_name)
-        if tag_value is None:
-            requests.post(
-                f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/reactivate",
-                headers=headers,
-                timeout=30,
-            ).raise_for_status()
-            LOG.info(
-                "Reactivated %s (%s): tag removed",
-                bucket_name,
-                entity_id,
-            )
-            reactivated_count += 1
+        deactivated_by_account[bucket_account[bucket_name]].append(
+            (bucket_name, entity_id)
+        )
+    all_accounts = set(failing_by_account) | set(deactivated_by_account)
+    LOG.info("Scanning %d accounts", len(all_accounts))
+
+    # Phase 2 & 3: one STS session per account
+    deactivated_count = 0
+    reactivated_count = 0
+    for account_id in all_accounts:
+        role_arn = f"arn:aws:iam::{account_id}:role/{role_name}"
+        session = get_session(role_arn=role_arn)
+
+        for bucket_name, entity_id in failing_by_account.get(account_id, []):
+            tag_value = _get_bucket_tag(bucket_name, session)
+            if tag_value:
+                reason = f"{MANAGED_PREFIX} {tag_value}"
+                requests.post(
+                    f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/deactivate",
+                    headers=headers,
+                    json={"deactivateReason": reason},
+                    timeout=30,
+                ).raise_for_status()
+                LOG.info(
+                    "Deactivated %s (%s): %s",
+                    bucket_name,
+                    entity_id,
+                    reason,
+                )
+                deactivated_count += 1
+
+        for bucket_name, entity_id in deactivated_by_account.get(
+            account_id, []
+        ):
+            tag_value = _get_bucket_tag(bucket_name, session)
+            if tag_value is None:
+                requests.post(
+                    f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/reactivate",
+                    headers=headers,
+                    timeout=30,
+                ).raise_for_status()
+                LOG.info(
+                    "Reactivated %s (%s): tag removed",
+                    bucket_name,
+                    entity_id,
+                )
+                reactivated_count += 1
 
     LOG.info(
         "Done. Deactivated: %d, Reactivated: %d, "
