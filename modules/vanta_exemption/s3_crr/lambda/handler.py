@@ -13,6 +13,9 @@ from typing import Optional
 
 import boto3
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 from infrahouse_core.aws import S3Bucket, Secret, get_session
 from infrahouse_core.logging import setup_logging
 
@@ -25,16 +28,36 @@ MANAGED_PREFIX = "[managed-by:org-governance]"
 VANTA_BASE_URL = "https://api.vanta.com/v1"
 
 
-def _get_vanta_token(secret_arn: str) -> str:
+def _vanta_session() -> requests.Session:
+    """Create a requests session with retry-on-429 backoff.
+
+    :return: Configured session.
+    :rtype: requests.Session
+    """
+    retry = Retry(
+        total=5,
+        backoff_factor=2,
+        status_forcelist=[429],
+        respect_retry_after_header=True,
+        allowed_methods=["GET", "POST"],
+    )
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
+
+
+def _get_vanta_token(secret_arn: str, session: requests.Session) -> str:
     """Fetch Vanta OAuth2 bearer token using client credentials.
 
     :param secret_arn: ARN of the Secrets Manager secret.
     :type secret_arn: str
+    :param session: Requests session with retry configuration.
+    :type session: requests.Session
     :return: Bearer access token.
     :rtype: str
     """
     secret = Secret(secret_arn).value
-    resp = requests.post(
+    resp = session.post(
         "https://api.vanta.com/oauth/token",
         json={
             "client_id": secret["client_id"],
@@ -48,13 +71,20 @@ def _get_vanta_token(secret_arn: str) -> str:
     return resp.json()["access_token"]
 
 
-def _paginate_vanta(url: str, headers: dict, params: Optional[dict] = None) -> list:
+def _paginate_vanta(
+    url: str,
+    headers: dict,
+    session: requests.Session,
+    params: Optional[dict] = None,
+) -> list:
     """Paginate a Vanta API endpoint, return all data items.
 
     :param url: Full API endpoint URL.
     :type url: str
     :param headers: HTTP headers including Authorization.
     :type headers: dict
+    :param session: Requests session with retry configuration.
+    :type session: requests.Session
     :param params: Additional query parameters.
     :type params: Optional[dict]
     :return: All data items across pages.
@@ -66,7 +96,7 @@ def _paginate_vanta(url: str, headers: dict, params: Optional[dict] = None) -> l
         p = {"pageSize": 100, **(params or {})}
         if cursor:
             p["pageCursor"] = cursor
-        resp = requests.get(url, headers=headers, params=p, timeout=30)
+        resp = session.get(url, headers=headers, params=p, timeout=30)
         resp.raise_for_status()
         body = resp.json()["results"]
         items.extend(body["data"])
@@ -102,11 +132,14 @@ def handler(event: dict, context: object) -> dict:
     secret_arn = os.environ["VANTA_SECRET_ARN"]
     role_name = os.environ["ASSUME_ROLE_NAME"]
 
-    token = _get_vanta_token(secret_arn)
+    http = _vanta_session()
+    token = _get_vanta_token(secret_arn, http)
     headers = {"Authorization": f"Bearer {token}"}
 
     # Phase 1a: failing entities
-    failing = _paginate_vanta(f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities", headers)
+    failing = _paginate_vanta(
+        f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities", headers, http
+    )
     failing_map = {e["displayName"]: e["id"] for e in failing}
     LOG.info("Phase 1a: %d failing entities", len(failing_map))
 
@@ -114,6 +147,7 @@ def handler(event: dict, context: object) -> dict:
     deactivated = _paginate_vanta(
         f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities",
         headers,
+        http,
         params={"entityStatus": "DEACTIVATED"},
     )
     managed_deactivated = {
@@ -130,6 +164,7 @@ def handler(event: dict, context: object) -> dict:
     resources = _paginate_vanta(
         f"{VANTA_BASE_URL}/integrations/aws/resource-kinds/S3/resources",
         headers,
+        http,
     )
     bucket_account = {r["displayName"]: r["account"] for r in resources}
     LOG.info("Phase 1c: %d S3 resources in Vanta", len(bucket_account))
@@ -159,7 +194,7 @@ def handler(event: dict, context: object) -> dict:
             tag_value = _get_bucket_tag(bucket_name, session)
             if tag_value:
                 reason = f"{MANAGED_PREFIX} {tag_value}"
-                requests.post(
+                http.post(
                     f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/deactivate",
                     headers=headers,
                     json={"deactivateReason": reason},
@@ -178,7 +213,7 @@ def handler(event: dict, context: object) -> dict:
         ):
             tag_value = _get_bucket_tag(bucket_name, session)
             if tag_value is None:
-                requests.post(
+                http.post(
                     f"{VANTA_BASE_URL}/tests/{TEST_ID}/entities/{entity_id}/reactivate",
                     headers=headers,
                     timeout=30,
