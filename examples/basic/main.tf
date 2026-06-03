@@ -1,6 +1,6 @@
 module "org_governance" {
   source  = "registry.infrahouse.com/infrahouse/org-governance/aws"
-  version = "0.8.1"
+  version = "0.8.2"
 
   alarm_emails      = ["security@example.com"]
   vanta_external_id = var.vanta_external_id
