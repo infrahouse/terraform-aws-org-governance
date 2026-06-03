@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.2] - 2026-06-03
+
+### Bug Fixes
+
+- Add retry with backoff for Vanta API 429 rate limits
+
 ## [0.8.1] - 2026-05-10
 
 ### Performance
