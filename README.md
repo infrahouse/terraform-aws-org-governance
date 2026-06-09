@@ -90,7 +90,7 @@ Full documentation is available on
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_enforce_log_retention"></a> [enforce\_log\_retention](#module\_enforce\_log\_retention) | registry.infrahouse.com/infrahouse/lambda-monitored/aws | 1.1.0 |
+| <a name="module_enforce_log_retention"></a> [enforce\_log\_retention](#module\_enforce\_log\_retention) | registry.infrahouse.com/infrahouse/lambda-monitored/aws | 1.1.1 |
 | <a name="module_vanta_s3_crr"></a> [vanta\_s3\_crr](#module\_vanta\_s3\_crr) | ./modules/vanta_exemption/s3_crr | n/a |
 
 ## Resources
