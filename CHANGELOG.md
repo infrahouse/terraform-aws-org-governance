@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.3] - 2026-06-09
+
+### Bug Fixes
+
+- Tolerate deleted buckets in Vanta S3 CRR reconciler ([#19](https://github.com/infrahouse/terraform-aws-org-governance/issues/19))
+
 ## [0.8.2] - 2026-06-03
 
 ### Bug Fixes
