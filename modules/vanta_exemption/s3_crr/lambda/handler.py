@@ -13,6 +13,7 @@ from typing import Optional
 
 import boto3
 import requests
+from botocore.exceptions import ClientError
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -113,10 +114,16 @@ def _get_bucket_tag(bucket_name: str, session: boto3.Session) -> Optional[str]:
     :type bucket_name: str
     :param session: Boto3 session with credentials for the bucket's account.
     :type session: boto3.Session
-    :return: Tag value if present, None otherwise.
+    :return: Tag value if present, None otherwise. A deleted bucket
+        (``NoSuchBucket``) is treated as having no exemption tag.
     :rtype: Optional[str]
     """
-    return S3Bucket(bucket_name, session=session).tags.get(TAG_KEY)
+    try:
+        return S3Bucket(bucket_name, session=session).tags.get(TAG_KEY)
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "NoSuchBucket":
+            return None
+        raise
 
 
 def handler(event: dict, context: object) -> dict:
@@ -211,6 +218,8 @@ def handler(event: dict, context: object) -> dict:
         for bucket_name, entity_id in deactivated_by_account.get(
             account_id, []
         ):
+            # A deleted bucket reports no tag, so the stale managed-deactivated
+            # entity is reactivated here and drains out on the next run.
             tag_value = _get_bucket_tag(bucket_name, session)
             if tag_value is None:
                 http.post(
