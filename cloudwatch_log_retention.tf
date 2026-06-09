@@ -60,7 +60,7 @@ resource "aws_iam_policy" "enforce_log_retention" {
 module "enforce_log_retention" {
   count   = var.enforce_log_retention ? 1 : 0
   source  = "registry.infrahouse.com/infrahouse/lambda-monitored/aws"
-  version = "1.1.0"
+  version = "1.1.1"
 
   function_name     = "enforce-log-retention"
   lambda_source_dir = "${path.module}/lambda/enforce_log_retention"

@@ -27,7 +27,7 @@ resource "aws_iam_policy" "this" {
 
 module "lambda" {
   source  = "registry.infrahouse.com/infrahouse/lambda-monitored/aws"
-  version = "1.1.0"
+  version = "1.1.1"
 
   function_name     = "vanta-s3-crr-reconciler"
   lambda_source_dir = "${path.module}/lambda"
