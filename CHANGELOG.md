@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-06-09
+
+### Bug Fixes
+
+- Bump lambda-monitored to 1.1.1 to exempt lambda buckets in Vanta ([#20](https://github.com/infrahouse/terraform-aws-org-governance/issues/20))
+
 ## [0.8.3] - 2026-06-09
 
 ### Bug Fixes
